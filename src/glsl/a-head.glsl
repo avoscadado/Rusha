@@ -25,7 +25,7 @@ uniform vec4 uPathB;             // y frequency, y phase, y base, unused
 uniform float uTr[16];           // traits of the form
 uniform vec4 uSet;               // set piece: position, scale
 uniform vec4 uSetK;              // set piece: type, yaw, motion 0..1, lit 0..1
-uniform vec4 uEv;                // event: progress 0..1, type, two spare
+uniform vec4 uEv;                // event: progress 0..1, type, snow cover 0..1, spare
 uniform vec4 uSky;               // cloud cover, cloud height, stars, far ridge height
 uniform vec4 uBody[2];           // moons: direction, angular radius (0 = none)
 uniform vec4 uBodyK[2];          // moons: phase, ring, ink mix, unused
@@ -35,6 +35,7 @@ uniform float uClipOn;
 uniform vec4 uPortC[2];          // portals: centre, radius (0 = none)
 uniform vec4 uPortN[2];          // portals: normal, open 0..1
 uniform vec3 uPortInk[2];        // portals: the light that comes through
+uniform vec4 uFill;              // a second, shadowless light: direction, strength
 uniform vec4 uQ;                 // march steps, reflection steps, shadow steps, debug view
 
 #define TOP 0

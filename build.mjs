@@ -1,5 +1,6 @@
 // Folds src/ into one self-contained index.html. No dependencies.
 //   node build.mjs            -> index.html
+//   node build.mjs out.html   -> a build somewhere else, for testing without touching index.html
 // Layout: src/shell.html holds the page with three markers, /*CSS*/ /*GLSL*/ /*JS*/.
 // GLSL files become entries of a GLSL table keyed by their path under src/glsl
 // without the extension, for example "forms/highlands".
@@ -65,5 +66,6 @@ put('/*JS*/', js.replace(/<\/script/gi, '<\\/script'));
 if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /\bfetch\s*\(|XMLHttpRequest|importScripts/.test(html)) {
   throw new Error('index.html must stay self-contained: found an external reference or network call');
 }
-fs.writeFileSync(path.join(root, 'index.html'), html);
-console.log(`index.html ${(html.length / 1024).toFixed(1)} KB  (${Object.keys(glsl).length} glsl, ${jsFiles.length} js)`);
+const outFile = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'index.html');
+fs.writeFileSync(outFile, html);
+console.log(`${path.basename(outFile)} ${(html.length / 1024).toFixed(1)} KB  (${Object.keys(glsl).length} glsl, ${jsFiles.length} js)`);

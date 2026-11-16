@@ -151,7 +151,7 @@ void main() {
   }
   int nSteps = int(uQ.x), nShadow = int(uQ.z);
   vec3 acc = vec3(0.0);
-  float wgt = 1.0, glowOut = 0.0, tFirst = FAR, travelled = 0.0, cost = 0.0;
+  float wgt = 1.0, glowOut = 0.0, tFirst = FAR, travelled = 0.0, cost = 0.0, tHitP = -1.0;
 
   for (int b = uZero; b < 2; b++) {
     // what bounds this ray: the far plane, the sea, a portal
@@ -187,6 +187,10 @@ void main() {
       float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);
       n -= max(0.0, dot(n, rd)) * rd; n = normalize(n);
       Surf s = surf(p, n, t);
+      if (uEv.z > 0.001) {                                  // snow lies on whatever faces up
+        float k = uEv.z * smoothstep(0.5, 0.78, n.y);
+        s.lit = mix(s.lit, uInk[PAPER], k); s.shade = mix(s.shade, mix(uInk[PAPER], uInk[SHADE], 0.5), k); s.glow *= 1.0 - k;
+      }
       float ndl = dot(n, uSunDir), sh = 0.0;
       if (ndl > 0.0 && uSunDir.y > -0.02) {
         sh = 1.0; float st = 0.02 + 0.004 * t; vec3 sp = p + n * (0.01 + 0.002 * t);
@@ -204,6 +208,8 @@ void main() {
       float key = smoothstep(-0.02, 0.5, ndl) * sh;
       float nb = max(uSun.z, 1.0), x = key * nb;
       float tone = min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);
+      // the fill light can lift a surface by one band at most, and never casts a shadow
+      tone = max(tone, uFill.w * smoothstep(0.15, 0.3, dot(n, uFill.xyz)) / nb);
       vec3 shade = mix(s.shade, mix(s.shade, uInk[TOP], 0.22), clamp(n.y, 0.0, 1.0));
       c = mix(shade, s.lit, tone);
       c = mix(c, uInk[DEEP], clamp(-cav * 1.4, 0.0, 0.55) * s.line);
@@ -219,6 +225,7 @@ void main() {
       }
       g = s.glow;
       if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7 * exp(-t * uAir.x * 2.0));
+      if (b == 0) tHitP = t;
       // ground mist, then the stepped planes of haze
       float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);
       c = mix(c, mix(hazeInk(rd), uInk[PAPER], 0.45), mist);
@@ -253,7 +260,7 @@ void main() {
         float lat = atan(rel.x, rel.y);
         float w1 = vnoise(vec2(lat * 9.0 + uTime * 0.02, ld * 26.0 - uTime * 0.35));
         float w2 = vnoise(vec2(lat * 3.0, ld * 9.0 + uTime * 0.12));
-        vec3 nw = normalize(vec3((w2 - 0.5) * 0.10 * rp, 1.0, (w1 - 0.5) * 0.05 * rp));
+        vec3 nw = normalize(vec3((w2 - 0.5) * 0.05 * rp, 1.0, (w1 - 0.5) * 0.035 * rp));
         float f0 = uSea.x > 1.5 ? 0.86 : 0.42;
         float fr = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-rd, nw), 0.0, 1.0), 4.0);
         float fine = 1.0 - smoothstep(0.12, 0.3, 26.0 * uPix / max(-rd.y, 0.004));   // strokes fade before they alias
@@ -278,6 +285,15 @@ void main() {
       c = sky(rd, g);
     }
     if (!bounce) { acc += wgt * c; glowOut += wgt * g; break; }
+  }
+
+  // shafts of light, where the form has any: two flat tones laid over the plate
+  {
+    float sf = shafts(ro0, rd0, min(tFirst, FAR), ign(fc + 7.0));
+    if (sf > 0.0) {
+      float q = (floor(sf * 3.0) + smoothstep(0.3, 0.7, fract(sf * 3.0))) / 3.0;
+      acc = mix(acc, mix(uInk[GLOW], uInk[PAPER], 0.3), min(q, 1.0) * 0.42);
+    }
   }
 
   // drift: snow, motes, petals or rain in three shells, nearer than whatever was hit

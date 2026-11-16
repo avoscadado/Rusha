@@ -117,7 +117,9 @@ const ENG = {
   },
   prepareCandidates() {
     const [kk, sk] = this.childKeys(this.cur);
-    const kin = this.makeRecord(kk);
+    let kin = this.makeRecord(kk);
+    // a kin should differ from this place in a new way, not repeat the last change
+    for (let i = 0; i < 4 && kin.g.changeType === this.cur.g.changeType; i++) { kk.change = mix32(kk.change + 7919) || 1; kin = this.makeRecord(kk); }
     let stranger = this.makeRecord(sk);
     // a stranger must not land on a form whose shader failed on this device
     let tries = 0;
@@ -160,7 +162,14 @@ const ENG = {
     // flight
     let pace = 1;
     if (this.hurry && this.doors) pace = 3.2;
+    const z0 = w.z;
     w.z += g.speed * pace * dt;
+    if (g.pulse > 0 && Math.floor(w.z / g.pulse) !== Math.floor(z0 / g.pulse) && this.on.pulse) this.on.pulse(w);
+    const ev = g.ev;
+    if (ev.type !== 'none' && this.on.event) {
+      if (w.ta >= ev.t0 && w.ta - dt < ev.t0) this.on.event('start', w);
+      if (w.ta >= ev.t0 + ev.dur && w.ta - dt < ev.t0 + ev.dur) this.on.event('peak', w);
+    }
 
     // looking around: springs back to the line of flight when left alone
     const L = this.look;
@@ -297,11 +306,12 @@ const ENG = {
     GLX.fv('uTr[0]', live.tr);
     GLX.v4('uSet', live.set[0], live.set[1], live.set[2], g.set.scale);
     GLX.v4('uSetK', g.set.type, g.set.yaw, live.setMotion, live.setLit);
-    GLX.v4('uEv', live.ev, g.ev.id, 0, 0);
+    GLX.v4('uEv', live.ev, g.ev.id, live.cover, 0);
     GLX.v4('uSky', ...live.sky);
     gl.uniform4fv(GLX.loc('uBody[0]') || null, live.body);
     gl.uniform4fv(GLX.loc('uBodyK[0]') || null, live.bodyK);
     GLX.v4('uPart', ...live.part);
+    { const f = V.norm(g.fill); GLX.v4('uFill', f[0], f[1], f[2], g.fill[3]); }
     if (clip) { GLX.v4('uClip', clip[0], clip[1], clip[2], clip[3]); GLX.f('uClipOn', 1); } else GLX.f('uClipOn', 0);
     const pc = new Float32Array(8), pn = new Float32Array(8), pk = new Float32Array(6);
     if (doors) {
@@ -378,8 +388,8 @@ const ENG = {
     GLX.use(this.post.fin);
     GLX.tex('uSrc', 0, this.tg.scene.tex); GLX.tex('uGlow', 1, ga.tex); GLX.tex('uNoise', 2, this.noise);
     GLX.v2('uOut', this.cw, this.ch);
-    GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, 0);
-    GLX.v3('uFadeInk', w.g.inks.paper);
+    GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, this.debug);
+    GLX.v3('uFadeInk', w.g.pal.paper);
     GLX.draw(null, this.cw, this.ch);
     return true;
   },

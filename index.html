@@ -43,7 +43,7 @@ body.bleed #caption { position: fixed; left: 0; bottom: 0; padding: 18px 22px; c
 <div id="veil"><div id="veil-in"><div id="veil-title">Kin and Stranger</div><div id="veil-sub">mixing the inks</div></div></div>
 <script>
 (function () {
-const GLSL = {"a-head":"uniform sampler2D uNoise;\nuniform sampler2D uPortTex0;\nuniform sampler2D uPortTex1;\nuniform vec2 uRes;\nuniform vec3 uCamP, uCamR, uCamU, uCamF;\nuniform float uPix;\nuniform float uTime;\nuniform int uZero;\nuniform vec3 uInk[8];\nuniform vec3 uSunDir;\nuniform vec4 uSun;\nuniform vec4 uAir;\nuniform vec4 uSea;\nuniform vec4 uPathA;\nuniform vec4 uPathB;\nuniform float uTr[16];\nuniform vec4 uSet;\nuniform vec4 uSetK;\nuniform vec4 uEv;\nuniform vec4 uSky;\nuniform vec4 uBody[2];\nuniform vec4 uBodyK[2];\nuniform vec4 uPart;\nuniform vec4 uClip;\nuniform float uClipOn;\nuniform vec4 uPortC[2];\nuniform vec4 uPortN[2];\nuniform vec3 uPortInk[2];\nuniform vec4 uQ;\n#define TOP 0\n#define LOW 1\n#define GLOW 2\n#define LIT 3\n#define SHADE 4\n#define DEEP 5\n#define PAPER 6\n#define ACCENT 7\nfloat gD;\nvec3 gRd;\nfloat cellExit(vec2 q, float S) {\n  vec2 inv = 1.0 / max(abs(gRd.xz), vec2(1e-4));\n  vec2 tw = (S * 0.5 - q * sign(gRd.xz)) * inv;\n  return min(tw.x, tw.y) + 0.02 * S;\n}\nstruct Surf { vec3 lit; vec3 shade; float glow; float line; };\nvec4 cell4(ivec2 c) { return texelFetch(uNoise, c & 255, 0); }\nfloat cell1(ivec2 c) { return texelFetch(uNoise, c & 255, 0).r; }\nfloat vnoise(vec2 x) {\n  vec2 i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  ivec2 c = ivec2(i);\n  float a = cell1(c), b = cell1(c + ivec2(1, 0)), d = cell1(c + ivec2(0, 1)), e = cell1(c + ivec2(1, 1));\n  return mix(mix(a, b, f.x), mix(d, e, f.x), f.y);\n}\nfloat vnoise1(float x) {\n  float i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  int c = int(i);\n  return mix(cell1(ivec2(c, 71)), cell1(ivec2(c + 1, 71)), f);\n}\nfloat vnoise2(vec2 x) {\n  return 0.65 * vnoise(x) + 0.35 * vnoise(mat2(1.6, 1.2, -1.2, 1.6) * x + 31.7);\n}\nfloat ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }\nmat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }\nfloat sdBox(vec3 p, vec3 b) { vec3 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0); }\nfloat sdBox2(vec2 p, vec2 b) { vec2 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0); }\nfloat sdCyl(vec3 p, float r, float h) { vec2 d = vec2(length(p.xz) - r, abs(p.y) - h); return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)); }\nfloat sdTorus(vec3 p, float R, float r) { return length(vec2(length(p.xy) - R, p.z)) - r; }\nfloat sdSeg(vec3 p, vec3 a, vec3 b, float r) { vec3 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)) - r; }\nfloat stairs(float x, float s) { float k = x / s; return s * (floor(k) + smoothstep(0.0, 0.08, fract(k))); }\nvec2 pathXY(float z) {\n  return vec2(uPathA.x * sin(z * uPathA.y + uPathA.z),\n              uPathB.z + uPathA.w * sin(z * uPathB.x + uPathB.y));\n}\nfloat setRaw(vec3 q, float kind, float motion) {\n  float d = 1e5;\n  if (kind < 1.5) {\n    float frame = max(sdBox(q - vec3(0.0, 2.0, 0.0), vec3(1.25, 2.0, 0.16)), -sdBox(q - vec3(0.0, 1.8, 0.0), vec3(0.8, 1.8, 0.5)));\n    vec3 l = q - vec3(-0.8, 1.8, 0.0);\n    l.xz = rot(-1.9 * motion) * l.xz;\n    d = min(frame, sdBox(l - vec3(0.8, 0.0, 0.0), vec3(0.78, 1.78, 0.045)));\n  } else if (kind < 2.5) {\n    d = length(q - vec3(0.0, 1.0 + 2.4 * motion, 0.0)) - 1.0;\n  } else if (kind < 3.5) {\n    vec3 r = q - vec3(0.0, 1.55, 0.0);\n    d = sdTorus(r, 1.5, 0.11);\n  } else if (kind < 4.5) {\n    float taper = 0.42 - 0.035 * q.y;\n    d = max(sdBox2(q.xz, vec2(taper)), abs(q.y - 3.0) - 3.0);\n    d = min(d, sdBox(q - vec3(0.0, 6.15, 0.0), vec3(0.34, 0.15, 0.34)));\n    d = max(d, -sdBox(q - vec3(0.0, 5.3, 0.0), vec3(0.08, 0.14, 1.0)));\n  } else if (kind < 5.5) {\n    float tread = q.y - stairs(q.z + 3.0, 0.25) * 0.72;\n    d = max(max(tread * 0.7, abs(q.x) - 0.6), max(abs(q.z) - 3.0, -q.y - 0.2));\n    d = max(d, -(q.y - (q.z + 3.0) * 0.72 + 0.55) * 0.7);\n  } else if (kind < 6.5) {\n    vec3 a = q - vec3(0.0, 1.6, 0.0);\n    float outer = max(sdBox(a, vec3(1.5, 1.6, 0.34)), -a.y - 1.6);\n    float hole = min(length(a.xy - vec2(0.0, 0.5)) - 1.0, sdBox2(a.xy - vec2(0.0, -0.6), vec2(1.0, 1.1)));\n    d = max(outer, -hole);\n  } else if (kind < 7.5) {\n    vec3 s = q - vec3(0.0, 1.6 + 0.5 * motion, 0.0);\n    s.xy = rot(0.22) * s.xy;\n    d = sdBox(s, vec3(0.5, 1.4, 0.22));\n  } else {\n    d = sdCyl(q - vec3(0.0, 1.0, 0.0), 0.09, 1.0);\n    d = min(d, length(q - vec3(0.0, 2.3, 0.0)) - 0.8);\n    d = min(d, length(q - vec3(0.62, 1.85, 0.1)) - 0.5);\n    d = min(d, length(q - vec3(-0.55, 1.95, -0.15)) - 0.55);\n  }\n  return d;\n}\nfloat setPiece(vec3 p) {\n  if (uSetK.x < 0.5) return 1e5;\n  vec3 q = p - uSet.xyz;\n  float bound = length(q - vec3(0.0, 3.5 * uSet.w, 0.0)) - 5.5 * uSet.w;\n  if (bound > 2.0 * uSet.w) return bound;\n  q.xz = rot(uSetK.y) * q.xz;\n  return setRaw(q / uSet.w, uSetK.x, uSetK.z) * uSet.w;\n}\nSurf setSurf(vec3 p) {\n  vec3 q = p - uSet.xyz;\n  q.xz = rot(uSetK.y) * q.xz;\n  q /= uSet.w;\n  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.55), mix(uInk[SHADE], uInk[DEEP], 0.45), 0.0, 1.0);\n  float k = uSetK.x, lit = uSetK.w;\n  bool accent = false;\n  if (k < 1.5) accent = abs(q.z) < 0.6 && abs(q.x) < 0.8 && q.y < 3.6 && lit > 0.5 && false;\n  else if (k < 2.5) accent = lit > 0.01;\n  else if (k < 3.5) accent = lit > 0.01;\n  else if (k < 4.5) accent = q.y > 5.1 && q.y < 5.5 && abs(q.x) < 0.1;\n  else if (k < 7.5 && k > 6.5) accent = lit > 0.01;\n  else if (k > 7.5) accent = q.y > 1.4 && lit > 0.01;\n  if (accent) {\n    float a = (k > 3.5 && k < 4.5) ? max(lit, 0.35) : lit;\n    s.lit = mix(s.lit, uInk[ACCENT], a);\n    s.shade = mix(s.shade, uInk[ACCENT] * 0.72, a);\n    s.glow = a * ((k > 3.5 && k < 4.5) ? 1.0 : 0.35);\n  }\n  return s;\n}","forms/plain":"#define FAR 1500.0\n#define STEPK 0.92\n#define SHFAR 160.0\nfloat groundH(vec2 x) {\n  return uTr[8] > 0.01 ? uTr[8] * (vnoise(x * 0.012) - 0.5) * smoothstep(8.0, 40.0, abs(x.x)) : 0.0;\n}\nbool isOdd(ivec2 c) { return c.x == int(uTr[5]) && c.y == int(uTr[6]); }\nfloat thing(vec3 q, float kind, float H, float W, vec4 r, bool odd) {\n  float ex = odd ? uTr[7] : 0.0;\n  if (ex > 1.5 && ex < 2.5) return 1e5;\n  if (ex > 2.5 && ex < 3.5) { H *= 2.4; W *= 1.9; }\n  if (ex > 3.5) { q.xy = rot(1.32) * (q.xy - vec2(0.0, W)); q.y += W; }\n  float d;\n  if (kind < 1.5) {\n    float w = W * (1.0 - 0.55 * clamp(q.y / H, 0.0, 1.0));\n    d = max(sdBox2(q.xz, vec2(w)), abs(q.y - H * 0.5) - H * 0.5) * 0.9;\n  } else if (kind < 2.5) {\n    q.xz = rot(r.w * 6.283) * q.xz;\n    float h = H * (0.6 + 0.4 * r.x);\n    d = sdBox(q - vec3(0.0, h * 0.5, 0.0), vec3(W, h * 0.5, W * 0.38)) - W * 0.18;\n  } else if (kind < 3.5) {\n    d = sdCyl(q - vec3(0.0, H * 0.5, 0.0), W * 0.12, H * 0.5);\n    d = min(d, length(q - vec3(0.0, H + W * 0.55, 0.0)) - W * 0.6);\n  } else if (kind < 4.5) {\n    vec3 g = q; g.x = abs(g.x) - W * 2.2;\n    d = sdBox(g - vec3(0.0, H * 0.5, 0.0), vec3(W * 0.3, H * 0.5, W * 0.3));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.94, 0.0), vec3(W * 3.0, W * 0.28, W * 0.38)));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.74, 0.0), vec3(W * 2.4, W * 0.18, W * 0.26)));\n  } else {\n    d = length(q - vec3(0.0, -H * 0.15, 0.0)) - H * 0.75;\n  }\n  return d;\n}\nfloat map(vec3 p) {\n  float d = p.y - groundH(p.xz);\n  d = min(d, setPiece(p));\n  gD = d;\n  float kind = uTr[0];\n  if (kind < 0.5) return d;\n  float S = uTr[1], H = uTr[2], W = uTr[10];\n  float top = H * 2.5 + 2.0;\n  if (p.y > top) { d = min(d, p.y - top + 1.0); gD = d; return d; }\n  ivec2 c = ivec2(floor(p.xz / S));\n  vec4 r = cell4(c);\n  vec3 q = vec3(p.x - (float(c.x) + 0.5) * S, p.y, p.z - (float(c.y) + 0.5) * S);\n  float ex = cellExit(q.xz, S);\n  bool odd = isOdd(c);\n  if (r.x < uTr[4] || odd) {\n    q.xz -= (r.yz - 0.5) * S * 0.42 * uTr[3] * (odd ? 0.0 : 1.0);\n    d = min(d, thing(q, kind, H, W, r, odd));\n  }\n  gD = d;\n  return min(d, ex);\n}\nSurf surf(vec3 p, vec3 n, float t) {\n  float gh = groundH(p.xz);\n  if (setPiece(p) < 0.02 + 0.002 * t) return setSurf(p);\n  if (p.y - gh > 0.03 + 0.003 * t || n.y < 0.6) {\n    Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, 1.0);\n    float S = uTr[1];\n    ivec2 c = ivec2(floor(p.xz / S));\n    vec4 r = cell4(c);\n    bool odd = isOdd(c);\n    float kind = uTr[0];\n    bool lamp = kind > 2.5 && kind < 3.5 && p.y > uTr[2] * (odd && uTr[7] > 2.5 && uTr[7] < 3.5 ? 2.4 : 1.0);\n    float on = lamp ? step(r.w, uEv.x * 1.02 - 0.01) : 0.0;\n    if (odd && uTr[7] > 0.5 && uTr[7] < 1.5 && (lamp || kind < 2.5 || kind > 3.5)) on = 1.0;\n    if (on > 0.5) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[PAPER], 0.25); s.glow = lamp ? 1.0 : 0.3; }\n    return s;\n  }\n  Surf s = Surf(uInk[LIT], uInk[SHADE], 0.0, 0.0);\n  float fade = exp(-t * 0.006);\n  if (uTr[9] > 0.5 && uTr[9] < 1.5) {\n    vec2 x = p.xz * 0.16; ivec2 ci = ivec2(floor(x)); vec2 f = fract(x);\n    float d1 = 8.0, d2 = 8.0;\n    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {\n      vec4 r = cell4(ci + ivec2(i, j) + 53);\n      float d = length(vec2(float(i), float(j)) + r.xy - f);\n      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;\n    }\n    float line = 1.0 - smoothstep(0.02, 0.05 + 2.0 * uPix * t, d2 - d1);\n    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.55), line * fade);\n    s.shade = mix(s.shade, uInk[DEEP], line * fade * 0.4);\n  } else if (uTr[9] > 1.5) {\n    float line = smoothstep(0.42, 0.5, abs(fract(p.x * 0.5) - 0.5));\n    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.4), line * fade);\n  }\n  return s;\n}","post/blur":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel; uniform vec2 uDir;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel, d = uDir * uTexel;\n  vec3 s = texture(uSrc, uv).rgb * 0.2270;\n  s += (texture(uSrc, uv + d * 1.3846).rgb + texture(uSrc, uv - d * 1.3846).rgb) * 0.3162;\n  s += (texture(uSrc, uv + d * 3.2308).rgb + texture(uSrc, uv - d * 3.2308).rgb) * 0.0703;\n  O = vec4(s, 1.0);\n}","post/final":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc, uGlow, uNoise;\nuniform vec2 uOut;\nuniform vec4 uK;\nuniform vec3 uFadeInk;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy / uOut;\n  vec3 c = texture(uSrc, uv).rgb; c *= c;\n  vec3 g = texture(uGlow, uv).rgb; g *= g;\n  c += g * uK.x;\n  vec2 px = gl_FragCoord.xy;\n  float fibre = texture(uNoise, px * vec2(0.0021, 0.011)).r - 0.5;\n  float grain = texture(uNoise, px / 256.0).g - 0.5;\n  float tooth = fibre * 0.6 + grain * 0.8;\n  c *= 1.0 + tooth * uK.y;\n  c += tooth * uK.y * 0.012;\n  c = mix(uFadeInk, c, uK.z);\n  c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));\n  O = vec4(c + (grain) / 255.0, 1.0);\n}","post/glowpre":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel;\n  vec3 s = vec3(0.0);\n  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {\n    vec4 c = texture(uSrc, uv + (vec2(float(i), float(j)) - 0.5) * uTexel * 0.5);\n    s += c.rgb * c.rgb * c.a;\n  }\n  O = vec4(sqrt(s * 0.25), 1.0);\n}","z-main":"out vec4 O;\nvec3 skyBase(vec3 rd) {\n  float e = clamp(rd.y, 0.0, 1.0);\n  float g = pow(1.0 - e, 3.4);\n  vec3 c = mix(uInk[TOP], uInk[LOW], g);\n  vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n  vec2 rxz = normalize(rd.xz + vec2(0.0, 1e-4));\n  float toward = max(dot(rxz, sxz), 0.0);\n  float low = 1.0 - smoothstep(0.0, 0.55, uSunDir.y);\n  float wash = pow(toward, 3.0) * pow(1.0 - e, 5.0) * (0.35 + 0.65 * low);\n  c = mix(c, uInk[GLOW], wash * 0.85);\n  float halo = pow(max(dot(rd, uSunDir), 0.0), 24.0 / max(uSun.y, 0.05));\n  c = mix(c, uInk[GLOW], halo * 0.6 * step(-0.08, uSunDir.y));\n  if (rd.y < 0.0) c = mix(c, mix(uInk[LOW], uInk[SHADE], 0.45), clamp(-rd.y * 4.0, 0.0, 1.0));\n  return c;\n}\nvec3 hazeInk(vec3 rd) { return skyBase(normalize(vec3(rd.x, 0.035, rd.z))); }\nvec3 sky(vec3 rd, out float glow) {\n  glow = 0.0;\n  vec3 c = skyBase(rd);\n  float e = rd.y;\n  if (e < -0.02) return c;\n  if (uSky.z > 0.01) {\n    vec2 u = rd.xz / (abs(e) + 0.35) * 26.0;\n    ivec2 ci = ivec2(floor(u));\n    vec4 r = cell4(ci);\n    if (r.x > 1.0 - 0.07 * uSky.z) {\n      float d = length(fract(u) - 0.5 - (r.yz - 0.5) * 0.7);\n      float rad = max(0.035 + 0.05 * r.w, uPix * 30.0);\n      c = mix(c, uInk[PAPER], smoothstep(rad, rad * 0.45, d) * smoothstep(0.0, 0.25, e) * (0.45 + 0.55 * r.w));\n    }\n  }\n  for (int i = uZero; i < 2; i++) {\n    float r = uBody[i].w;\n    if (r > 0.0) {\n    vec3 dir = uBody[i].xyz;\n    vec3 dl = rd - dir;\n    float d = length(dl);\n    float aa = uPix * 1.2;\n    float disc = smoothstep(r + aa, r - aa, d);\n    if (disc > 0.0) {\n      vec3 side = normalize(cross(dir, vec3(0.0, 1.0, 0.0)));\n      float ph = uBodyK[i].x;\n      float lit = abs(ph) < 0.01 ? 1.0 : smoothstep(-aa, aa, length(dl - side * r * ph * 1.3) - r);\n      vec3 ink = mix(uInk[PAPER], uInk[ACCENT], uBodyK[i].z);\n      c = mix(c, mix(mix(c, uInk[SHADE], 0.25), ink, lit), disc);\n      glow = max(glow, disc * lit * 0.25);\n    }\n    if (uBodyK[i].y > 0.5) {\n      vec3 up = normalize(vec3(0.35, 1.0, 0.2));\n      vec3 sx = normalize(cross(dir, up)), sy = cross(sx, dir);\n      vec2 q = vec2(dot(dl, sx), dot(dl, sy) * 3.6) / r;\n      float ring = abs(length(q) - 1.75);\n      float hide = disc * step(0.0, dot(dl, sy));\n      c = mix(c, uInk[PAPER], smoothstep(0.16, 0.08, ring) * (1.0 - hide) * 0.8);\n    }\n    }\n  }\n  if (uSunDir.y > -0.05) {\n    float d = length(rd - uSunDir), aa = uPix * 1.2;\n    float disc = smoothstep(uSun.x + aa, uSun.x - aa, d);\n    c = mix(c, mix(uInk[PAPER], uInk[GLOW], 0.25), disc);\n    glow = max(glow, disc);\n  }\n  if (uSky.w > 0.001) {\n    float az = atan(rd.x, rd.z);\n    vec3 hz = hazeInk(rd);\n    for (int i = uZero; i < 3; i++) {\n      float fi = float(i);\n      float h = uSky.w * (1.0 - 0.27 * fi) * (0.25 + 0.75 * vnoise1(az * (5.0 + 4.0 * fi) + 19.0 * fi + 3.0))\n              + uSky.w * 0.12 * vnoise1(az * (23.0 + 9.0 * fi) + 7.0 * fi);\n      float m = smoothstep(h + uPix, h - uPix, e);\n      c = mix(c, mix(hz, uInk[SHADE], 0.16 + 0.17 * fi), m);\n      glow *= 1.0 - m;\n    }\n  }\n  if (uSky.x > 0.01 && e > 0.0) {\n    float az = atan(rd.x, rd.z);\n    vec2 u = vec2(az * 1.7 + uTime * 0.002, e * 13.0 * uSky.y);\n    float n = 0.62 * vnoise(u) + 0.38 * vnoise(u * vec2(2.3, 1.9) + 17.0);\n    float th = 0.86 - 0.42 * uSky.x;\n    float band = smoothstep(0.03, 0.12, e) * (1.0 - smoothstep(0.3, 0.5, e));\n    float w = 0.012 + 2.0 * uPix;\n    float m = smoothstep(th, th + w, n) * band;\n    float lip = 1.0 - smoothstep(th + 0.02, th + 0.075, n);\n    vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n    float toward = max(dot(normalize(rd.xz + vec2(0.0, 1e-4)), sxz), 0.0);\n    vec3 body = mix(mix(c, uInk[PAPER], 0.5), uInk[GLOW], 0.45 * toward);\n    vec3 edge = mix(mix(c, uInk[PAPER], 0.85), uInk[GLOW], 0.3 * toward);\n    c = mix(c, mix(body, edge, lip), m);\n    glow *= 1.0 - 0.8 * m;\n  }\n  return c;\n}\nfloat hazeStep(float t) {\n  float h = 1.0 - exp(-t * uAir.x);\n  float n = max(uAir.y, 1.0), x = h * n;\n  return min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);\n}\nvec3 calcN(vec3 p, float h, out float cav) {\n  vec3 n = vec3(0.0); float s = 0.0;\n  gRd = vec3(0.0);\n  for (int i = uZero; i < 4; i++) {\n    vec3 e = 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0);\n    float d = map(p + e * h);\n    n += e * d; s += d;\n  }\n  cav = s / (4.0 * h);\n  return normalize(n);\n}\nfloat discHit(vec3 ro, vec3 rd, vec4 c, vec4 n, out float rr) {\n  rr = 0.0;\n  float R = c.w * n.w;\n  if (R <= 0.001) return -1.0;\n  float dn = dot(rd, n.xyz);\n  if (abs(dn) < 1e-5) return -1.0;\n  float t = dot(c.xyz - ro, n.xyz) / dn;\n  if (t <= 0.0) return -1.0;\n  rr = length(ro + rd * t - c.xyz) / R;\n  return rr < 1.0 ? t : -1.0;\n}\nvoid main() {\n  vec2 fc = gl_FragCoord.xy;\n  vec2 uv = (fc * 2.0 - uRes) / uRes.y;\n  vec3 rd = normalize(uv.x * uCamR + uv.y * uCamU + uCamF);\n  vec3 ro = uCamP;\n  vec3 rd0 = rd, ro0 = ro;\n  float tMin = 0.05;\n  if (uClipOn > 0.5) {\n    float dn = dot(rd, uClip.xyz);\n    float tc = (uClip.w - dot(ro, uClip.xyz)) / (abs(dn) < 1e-5 ? 1e-5 : dn);\n    if (dn > 0.0) tMin = max(tMin, tc);\n  }\n  int nSteps = int(uQ.x), nShadow = int(uQ.z);\n  vec3 acc = vec3(0.0);\n  float wgt = 1.0, glowOut = 0.0, tFirst = FAR, travelled = 0.0, cost = 0.0;\n  for (int b = uZero; b < 2; b++) {\n    float tMax = FAR; int stop = 0; float rr = 0.0; int pi = 0;\n    if (uSea.x > 0.5 && rd.y < -1e-4) {\n      float ts = (uSea.y - ro.y) / rd.y;\n      if (ts > tMin && ts < tMax) { tMax = ts; stop = 1; }\n    }\n    for (int k = uZero; k < 2; k++) {\n      float r1; float tp = discHit(ro, rd, uPortC[k], uPortN[k], r1);\n      if (tp > tMin && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }\n    }\n    float t = tMin, pd = 1e9, edge = 0.0; bool hit = false, spent = true;\n    gRd = rd;\n    float jit = 0.6 + 0.4 * ign(fc + float(b) * 17.0);\n    for (int i = uZero; i < 200; i++) {\n      if (i >= nSteps) break;\n      float d = map(ro + rd * t);\n      cost += 1.0;\n      if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; break; }\n      if (gD > pd && pd < 1.6 * uPix * t) edge = 1.0;\n      pd = gD;\n      t += d * STEPK * (i == 0 ? jit : 1.0);\n      if (t > tMax) { spent = false; break; }\n    }\n    vec3 c; float g = 0.0; bool bounce = false;\n    if (spent && t < tMax * 0.97) {\n      c = hazeInk(rd);\n      if (b == 0) tFirst = t;\n    } else if (hit && t < tMax) {\n      vec3 p = ro + rd * t;\n      float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);\n      n -= max(0.0, dot(n, rd)) * rd; n = normalize(n);\n      Surf s = surf(p, n, t);\n      float ndl = dot(n, uSunDir), sh = 0.0;\n      if (ndl > 0.0 && uSunDir.y > -0.02) {\n        sh = 1.0; float st = 0.02 + 0.004 * t; vec3 sp = p + n * (0.01 + 0.002 * t);\n        gRd = uSunDir;\n        for (int i = uZero; i < 48; i++) {\n          if (i >= nShadow) break;\n          float d = map(sp + uSunDir * st);\n          cost += 1.0;\n          sh = min(sh, uSun.w * d / st);\n          st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);\n          if (sh < 0.02 || st > SHFAR) break;\n        }\n        sh = smoothstep(0.25, 0.6, sh);\n      }\n      float key = smoothstep(-0.02, 0.5, ndl) * sh;\n      float nb = max(uSun.z, 1.0), x = key * nb;\n      float tone = min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);\n      vec3 shade = mix(s.shade, mix(s.shade, uInk[TOP], 0.22), clamp(n.y, 0.0, 1.0));\n      c = mix(shade, s.lit, tone);\n      c = mix(c, uInk[DEEP], clamp(-cav * 1.4, 0.0, 0.55) * s.line);\n      c = mix(c, uInk[PAPER], clamp(cav * 0.7, 0.0, 0.22) * s.line * tone);\n      for (int k = uZero; k < 2; k++) {\n        float R = uPortC[k].w * uPortN[k].w;\n        if (R > 0.001) {\n          vec3 lp = uPortC[k].xyz - p; float l2 = dot(lp, lp);\n          float f = R * R / (l2 + R * R) * clamp(dot(n, lp) * inversesqrt(l2) * 0.75 + 0.25, 0.0, 1.0);\n          c = mix(c, uPortInk[k], f * 0.55);\n        }\n      }\n      g = s.glow;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7 * exp(-t * uAir.x * 2.0));\n      float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);\n      c = mix(c, mix(hazeInk(rd), uInk[PAPER], 0.45), mist);\n      float hz = hazeStep(travelled + t);\n      c = mix(c, hazeInk(rd), hz * 0.94);\n      g *= 1.0 - hz;\n      if (b == 0) tFirst = t;\n    } else if (stop == 2) {\n      vec3 through = b == 0\n        ? (pi == 0 ? texelFetch(uPortTex0, ivec2(fc), 0).rgb : texelFetch(uPortTex1, ivec2(fc), 0).rgb)\n        : sqrt(uPortInk[pi]);\n      through *= through;\n      float lw = clamp(2.2 * uPix * tMax / (uPortC[pi].w * uPortN[pi].w), 0.004, 0.2);\n      float rim = smoothstep(1.0 - lw, 1.0 - 0.5 * lw, rr);\n      c = mix(through, uInk[PAPER], rim);\n      g = rim * 0.5;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7);\n      if (b == 0) tFirst = tMax;\n    } else if (stop == 1) {\n      vec3 pw = ro + rd * tMax;\n      float far = hazeStep(travelled + tMax);\n      if (b == 0) tFirst = tMax;\n      if (uSea.x > 2.5) {\n        float wv = vnoise2(pw.xz * 0.012 + uTime * 0.01);\n        c = mix(mix(hazeInk(rd), uInk[PAPER], 0.35 + 0.3 * step(0.5, wv)), hazeInk(rd), far * 0.9);\n      } else {\n        float rp = uSea.z * (1.0 - 0.9 * far);\n        vec2 rel = pw.xz - ro0.xz;\n        float dist = length(rel), ld = log(dist + 2.0);\n        float lat = atan(rel.x, rel.y);\n        float w1 = vnoise(vec2(lat * 9.0 + uTime * 0.02, ld * 26.0 - uTime * 0.35));\n        float w2 = vnoise(vec2(lat * 3.0, ld * 9.0 + uTime * 0.12));\n        vec3 nw = normalize(vec3((w2 - 0.5) * 0.10 * rp, 1.0, (w1 - 0.5) * 0.05 * rp));\n        float f0 = uSea.x > 1.5 ? 0.86 : 0.42;\n        float fr = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-rd, nw), 0.0, 1.0), 4.0);\n        float fine = 1.0 - smoothstep(0.12, 0.3, 26.0 * uPix / max(-rd.y, 0.004));\n        float stroke = smoothstep(0.71, 0.74, w1) * smoothstep(0.35, 0.5, w2) * rp * fine;\n        vec3 body = mix(mix(uInk[SHADE], uInk[TOP], 0.5), hazeInk(rd), far * 0.94);\n        body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.5 * (1.0 - far));\n        if (b == 0 && uQ.y > 0.5) {\n          float nearK = 0.4 * (1.0 - smoothstep(4.0, 70.0, dist));\n          fr *= 1.0 - nearK;\n          acc += wgt * (1.0 - fr) * body;\n          wgt *= fr * (1.0 - 0.75 * stroke);\n          ro = pw + vec3(0.0, 0.01, 0.0);\n          rd = reflect(rd, nw); rd.y = max(rd.y, 0.015); rd = normalize(rd);\n          travelled = tMax; tMin = 0.05;\n          nSteps = int(uQ.y);\n          bounce = true;\n        } else {\n          float gs; c = mix(body, sky(reflect(rd, nw), gs), fr);\n        }\n      }\n    } else {\n      c = sky(rd, g);\n    }\n    if (!bounce) { acc += wgt * c; glowOut += wgt * g; break; }\n  }\n  if (uPart.x > 0.5) {\n    for (int k = uZero; k < 3; k++) {\n      float dk = 5.0 + 9.0 * float(k) * float(k);\n      if (dk < tFirst) {\n      vec3 p = ro0 + rd0 * dk;\n      float cs = 1.6 + 1.3 * float(k);\n      float rain = step(3.5, uPart.x);\n      p.y += uTime * uPart.z * (1.0 + 0.3 * float(k));\n      p.x += uTime * uPart.z * 0.35 + 0.6 * sin(p.y * 0.4 + float(k));\n      vec3 q = p / cs; q.y *= mix(1.0, 0.18, rain);\n      ivec3 ci = ivec3(floor(q));\n      vec4 r = cell4(ci.xy + ci.z * ivec2(37, 17) + k * 91);\n      vec3 f = fract(q) - 0.5 - (r.xyz - 0.5) * 0.6;\n      f.y /= mix(1.0, 0.18, rain);\n      float size = (0.035 + 0.05 * r.x) * uPart.w * mix(1.0, 0.45, rain) / cs * (1.0 + 20.0 * uPix * dk);\n      float m = smoothstep(size, size * 0.6, length(f.xy * vec2(1.0, mix(1.0, 0.1, rain)))) * step(r.w, uPart.y);\n      vec3 ink = uPart.x < 2.5 ? uInk[PAPER] : (uPart.x < 3.5 ? mix(uInk[ACCENT], uInk[PAPER], 0.35) : mix(uInk[PAPER], uInk[LOW], 0.5));\n      acc = mix(acc, ink, m * (uPart.x > 1.5 && uPart.x < 2.5 ? 0.6 : 0.9) * mix(1.0, 0.5, rain));\n      }\n    }\n  }\n  if (uQ.w > 0.5) { acc = vec3(cost / 200.0, cost > 160.0 ? 1.0 : 0.0, 0.0); glowOut = 0.0; }\n  acc = clamp(acc, 0.0, 1.0);\n  vec3 enc = sqrt(acc) + (ign(fc) - 0.5) / 255.0;\n  O = vec4(enc, clamp(glowOut, 0.0, 1.0));\n}"};
+const GLSL = {"a-head":"uniform sampler2D uNoise;\nuniform sampler2D uPortTex0;\nuniform sampler2D uPortTex1;\nuniform vec2 uRes;\nuniform vec3 uCamP, uCamR, uCamU, uCamF;\nuniform float uPix;\nuniform float uTime;\nuniform int uZero;\nuniform vec3 uInk[8];\nuniform vec3 uSunDir;\nuniform vec4 uSun;\nuniform vec4 uAir;\nuniform vec4 uSea;\nuniform vec4 uPathA;\nuniform vec4 uPathB;\nuniform float uTr[16];\nuniform vec4 uSet;\nuniform vec4 uSetK;\nuniform vec4 uEv;\nuniform vec4 uSky;\nuniform vec4 uBody[2];\nuniform vec4 uBodyK[2];\nuniform vec4 uPart;\nuniform vec4 uClip;\nuniform float uClipOn;\nuniform vec4 uPortC[2];\nuniform vec4 uPortN[2];\nuniform vec3 uPortInk[2];\nuniform vec4 uFill;\nuniform vec4 uQ;\n#define TOP 0\n#define LOW 1\n#define GLOW 2\n#define LIT 3\n#define SHADE 4\n#define DEEP 5\n#define PAPER 6\n#define ACCENT 7\nfloat gD;\nvec3 gRd;\nfloat cellExit(vec2 q, float S) {\n  vec2 inv = 1.0 / max(abs(gRd.xz), vec2(1e-4));\n  vec2 tw = (S * 0.5 - q * sign(gRd.xz)) * inv;\n  return min(tw.x, tw.y) + 0.02 * S;\n}\nstruct Surf { vec3 lit; vec3 shade; float glow; float line; };\nvec4 cell4(ivec2 c) { return texelFetch(uNoise, c & 255, 0); }\nfloat cell1(ivec2 c) { return texelFetch(uNoise, c & 255, 0).r; }\nfloat vnoise(vec2 x) {\n  vec2 i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  ivec2 c = ivec2(i);\n  float a = cell1(c), b = cell1(c + ivec2(1, 0)), d = cell1(c + ivec2(0, 1)), e = cell1(c + ivec2(1, 1));\n  return mix(mix(a, b, f.x), mix(d, e, f.x), f.y);\n}\nfloat vnoise1(float x) {\n  float i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  int c = int(i);\n  return mix(cell1(ivec2(c, 71)), cell1(ivec2(c + 1, 71)), f);\n}\nfloat vnoise2(vec2 x) {\n  return 0.65 * vnoise(x) + 0.35 * vnoise(mat2(1.6, 1.2, -1.2, 1.6) * x + 31.7);\n}\nfloat ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }\nmat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }\nfloat sdBox(vec3 p, vec3 b) { vec3 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0); }\nfloat sdBox2(vec2 p, vec2 b) { vec2 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0); }\nfloat sdCyl(vec3 p, float r, float h) { vec2 d = vec2(length(p.xz) - r, abs(p.y) - h); return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)); }\nfloat sdTorus(vec3 p, float R, float r) { return length(vec2(length(p.xy) - R, p.z)) - r; }\nfloat sdSeg(vec3 p, vec3 a, vec3 b, float r) { vec3 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)) - r; }\nfloat stairs(float x, float s) { float k = x / s; return s * (floor(k) + smoothstep(0.0, 0.08, fract(k))); }\nvec2 pathXY(float z) {\n  return vec2(uPathA.x * sin(z * uPathA.y + uPathA.z),\n              uPathB.z + uPathA.w * sin(z * uPathB.x + uPathB.y));\n}\nfloat setRaw(vec3 q, float kind, float motion) {\n  float d = 1e5;\n  if (kind < 1.5) {\n    float frame = max(sdBox(q - vec3(0.0, 2.0, 0.0), vec3(1.25, 2.0, 0.16)), -sdBox(q - vec3(0.0, 1.8, 0.0), vec3(0.8, 1.8, 0.5)));\n    vec3 l = q - vec3(-0.8, 1.8, 0.0);\n    l.xz = rot(-1.9 * motion) * l.xz;\n    d = min(frame, sdBox(l - vec3(0.8, 0.0, 0.0), vec3(0.78, 1.78, 0.045)));\n  } else if (kind < 2.5) {\n    d = length(q - vec3(0.0, 1.0 + 2.4 * motion, 0.0)) - 1.0;\n  } else if (kind < 3.5) {\n    vec3 r = q - vec3(0.0, 1.55, 0.0);\n    d = sdTorus(r, 1.5, 0.11);\n  } else if (kind < 4.5) {\n    float taper = 0.42 - 0.035 * q.y;\n    d = max(sdBox2(q.xz, vec2(taper)), abs(q.y - 3.0) - 3.0);\n    d = min(d, sdBox(q - vec3(0.0, 6.15, 0.0), vec3(0.34, 0.15, 0.34)));\n    d = max(d, -sdBox(q - vec3(0.0, 5.3, 0.0), vec3(0.08, 0.14, 1.0)));\n  } else if (kind < 5.5) {\n    float tread = q.y - stairs(q.z + 3.0, 0.25) * 0.72;\n    d = max(max(tread * 0.7, abs(q.x) - 0.6), max(abs(q.z) - 3.0, -q.y - 0.2));\n    d = max(d, -(q.y - (q.z + 3.0) * 0.72 + 0.55) * 0.7);\n  } else if (kind < 6.5) {\n    vec3 a = q - vec3(0.0, 1.6, 0.0);\n    float outer = max(sdBox(a, vec3(1.5, 1.6, 0.34)), -a.y - 1.6);\n    float hole = min(length(a.xy - vec2(0.0, 0.5)) - 1.0, sdBox2(a.xy - vec2(0.0, -0.6), vec2(1.0, 1.1)));\n    d = max(outer, -hole);\n  } else if (kind < 7.5) {\n    vec3 s = q - vec3(0.0, 1.6 + 0.5 * motion, 0.0);\n    s.xy = rot(0.22) * s.xy;\n    d = sdBox(s, vec3(0.5, 1.4, 0.22));\n  } else {\n    d = sdCyl(q - vec3(0.0, 1.0, 0.0), 0.09, 1.0);\n    d = min(d, length(q - vec3(0.0, 2.3, 0.0)) - 0.8);\n    d = min(d, length(q - vec3(0.62, 1.85, 0.1)) - 0.5);\n    d = min(d, length(q - vec3(-0.55, 1.95, -0.15)) - 0.55);\n  }\n  return d;\n}\nfloat setPiece(vec3 p) {\n  if (uSetK.x < 0.5) return 1e5;\n  vec3 q = p - uSet.xyz;\n  float bound = length(q - vec3(0.0, 3.5 * uSet.w, 0.0)) - 5.5 * uSet.w;\n  if (bound > 2.0 * uSet.w) return bound;\n  q.xz = rot(uSetK.y) * q.xz;\n  return setRaw(q / uSet.w, uSetK.x, uSetK.z) * uSet.w;\n}\nSurf setSurf(vec3 p) {\n  vec3 q = p - uSet.xyz;\n  q.xz = rot(uSetK.y) * q.xz;\n  q /= uSet.w;\n  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.55), mix(uInk[SHADE], uInk[DEEP], 0.45), 0.0, 1.0);\n  float k = uSetK.x, lit = uSetK.w;\n  bool accent = false;\n  if (k < 1.5) accent = abs(q.z) < 0.6 && abs(q.x) < 0.8 && q.y < 3.6 && lit > 0.5 && false;\n  else if (k < 2.5) accent = lit > 0.01;\n  else if (k < 3.5) accent = lit > 0.01;\n  else if (k < 4.5) accent = q.y > 5.1 && q.y < 5.5 && abs(q.x) < 0.1;\n  else if (k < 7.5 && k > 6.5) accent = lit > 0.01;\n  else if (k > 7.5) accent = q.y > 1.4 && lit > 0.01;\n  if (accent) {\n    float a = (k > 3.5 && k < 4.5) ? max(lit, 0.35) : lit;\n    s.lit = mix(s.lit, uInk[ACCENT], a);\n    s.shade = mix(s.shade, uInk[ACCENT] * 0.72, a);\n    s.glow = a * ((k > 3.5 && k < 4.5) ? 1.0 : 0.35);\n  }\n  return s;\n}","forms/cistern":"#define FAR 420.0\n#define STEPK 0.95\n#define SHFAR 70.0\nfloat archHole(vec2 q, float a, float h0) {\n  return min(sdBox2(q - vec2(0.0, h0 * 0.5 - 2.0), vec2(a, h0 * 0.5 + 2.0)), length(q - vec2(0.0, h0)) - a);\n}\nfloat inBeam(vec3 p) {\n  float S = uTr[0];\n  vec3 q = p + uSunDir * ((uTr[1] - p.y) / max(uSunDir.y, 0.05));\n  float u = mod(q.x + S * 0.5, S) - S * 0.5;\n  float n = max(uTr[7], 1.0);\n  float vz = mod(q.z + S * 0.5, S * n) - S * n * 0.5;\n  return step(max(abs(u), abs(vz)), uTr[6]);\n}\nfloat shafts(vec3 ro, vec3 rd, float t, float jit) {\n  if (uTr[6] < 0.01 || uTr[13] > 0.5 || uSunDir.y < 0.05) return 0.0;\n  float far = min(t, 5.0 * uTr[0]), s = 0.0;\n  for (int i = uZero; i < 14; i++) {\n    float f = (float(i) + 0.3 + 0.4 * jit) / 14.0;\n    vec3 p = ro + rd * far * f;\n    s += inBeam(p) * step(p.y, uTr[1]) * exp(-far * f * uAir.x * 1.5);\n  }\n  return s / 14.0 * (far / (4.0 * uTr[0])) * 1.5;\n}\nfloat map(vec3 p) {\n  float S = uTr[0], H = uTr[1], h0 = uTr[2], r = uTr[3], w = uTr[11];\n  float u = mod(p.x + S * 0.5, S) - S * 0.5;\n  float v = mod(p.z, S) - S * 0.5;\n  float cu = S * 0.5 - abs(u), cv = S * 0.5 - abs(v);\n  float a = S * 0.5 - r;\n  float cz = floor(p.z / S + 0.5), side = sign(p.x);\n  bool odd = uTr[9] > 0.5 && abs(cz - uTr[8]) < 0.5 && abs(p.x) < S && side * uTr[10] > 0.0;\n  float top = uTr[5] > 0.5 ? h0 + 0.3 : H;\n  float col = uTr[4] < 0.5 ? length(vec2(cu, cv)) - r : max(cu, cv) - r * 0.9;\n  col = max(col, p.y - top);\n  col = min(col, max(max(cu, cv) - r * 1.35, abs(p.y - 0.25) - 0.45));\n  col = min(col, max(max(cu, cv) - r * 1.3, abs(p.y - top + 0.25) - 0.3));\n  if (odd) {\n    if (uTr[9] > 1.5 && uTr[9] < 2.5) col = 1e5;\n    else if (uTr[9] > 2.5) col = max(col, p.y - 1.6 - 0.5 * cu);\n  }\n  float d = col;\n  if (uTr[5] > 0.5) {\n    d = min(d, max(max(cu - w, -archHole(vec2(v, p.y), a, h0)), p.y - H));\n    if (uTr[5] > 1.5) d = min(d, max(max(cv - w, -archHole(vec2(u, p.y), a, h0)), p.y - H));\n  }\n  if (uTr[13] < 0.5) {\n    float roof = max(H - p.y, p.y - H - 0.7);\n    if (uTr[6] > 0.01) {\n      float n = max(uTr[7], 1.0);\n      float vz = mod(p.z + S * 0.5, S * n) - S * n * 0.5;\n      roof = max(roof, uTr[6] - max(abs(u), abs(vz)));\n    }\n    d = min(d, roof);\n  }\n  d = min(d, p.y + 0.6);\n  d = min(d, setPiece(p));\n  gD = d;\n  return d;\n}\nSurf surf(vec3 p, vec3 n, float t) {\n  if (setPiece(p) < 0.02 + 0.002 * t) return setSurf(p);\n  float S = uTr[0], H = uTr[1];\n  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.35), mix(uInk[SHADE], uInk[DEEP], 0.4), 0.0, 1.0);\n  if (p.y < -0.5) {\n    s.lit = uInk[LIT]; s.shade = uInk[SHADE];\n    vec2 f = abs(fract(p.xz / (S * 0.25)) - 0.5);\n    float line = smoothstep(0.47, 0.49, max(f.x, f.y)) * exp(-t * 0.02);\n    s.shade = mix(s.shade, uInk[DEEP], line * 0.5); s.lit = mix(s.lit, uInk[SHADE], line * 0.5);\n    s.line = 0.0;\n    return s;\n  }\n  if (p.y > H - 0.02 && n.y < -0.5) { s.lit = mix(uInk[LIT], uInk[SHADE], 0.5); return s; }\n  float course = smoothstep(0.44, 0.48, abs(fract(p.y / 0.9) - 0.5)) * step(abs(n.y), 0.5) * exp(-t * 0.03);\n  s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.45), course * 0.6);\n  float wet = uSea.x > 0.5 ? smoothstep(uSea.y + 0.9, uSea.y + 0.5, p.y) : 0.0;\n  s.lit = mix(s.lit, mix(uInk[SHADE], uInk[LIT], 0.35), wet); s.shade = mix(s.shade, uInk[DEEP], wet * 0.5);\n  float cz = floor(p.z / S + 0.5);\n  bool odd = uTr[9] > 0.5 && uTr[9] < 1.5 && abs(cz - uTr[8]) < 0.5 && abs(p.x) < S && sign(p.x) * uTr[10] > 0.0;\n  float u = mod(p.x + S * 0.5, S) - S * 0.5, v = mod(p.z, S) - S * 0.5;\n  bool onCol = length(vec2(S * 0.5 - abs(u), S * 0.5 - abs(v))) < uTr[3] * 1.5;\n  if (odd && onCol && p.y < uTr[2] + 0.4) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[DEEP], 0.4); s.glow = 0.12; }\n  vec3 lc = vec3(sign(u) * (S * 0.5 - uTr[3]), 2.7, sign(v) * S * 0.5);\n  if (uTr[12] > 0.5 && length(vec3(u, p.y, v) - lc) < 0.42) {\n    float on = step(cell1(ivec2(int(cz), int(sign(p.x)) + 5)), uEv.x * 1.02 - 0.01);\n    s.lit = mix(s.lit, uInk[ACCENT], on); s.shade = mix(s.shade, uInk[ACCENT], on); s.glow = on;\n  }\n  return s;\n}","forms/plain":"#define FAR 1500.0\n#define STEPK 0.92\n#define SHFAR 160.0\nfloat groundH(vec2 x) {\n  return uTr[8] > 0.01 ? uTr[8] * (vnoise(x * 0.012) - 0.5) * smoothstep(8.0, 40.0, abs(x.x)) : 0.0;\n}\nbool isOdd(ivec2 c) { return c.x == int(uTr[5]) && c.y == int(uTr[6]); }\nfloat thing(vec3 q, float kind, float H, float W, vec4 r, bool odd) {\n  float ex = odd ? uTr[7] : 0.0;\n  if (ex > 1.5 && ex < 2.5) return 1e5;\n  if (ex > 2.5 && ex < 3.5) { H *= 2.4; W *= 1.9; }\n  if (ex > 3.5) { q.xy = rot(1.32) * (q.xy - vec2(0.0, W)); q.y += W; }\n  float d;\n  if (kind < 1.5) {\n    float w = W * (1.0 - 0.55 * clamp(q.y / H, 0.0, 1.0));\n    d = max(sdBox2(q.xz, vec2(w)), abs(q.y - H * 0.5) - H * 0.5) * 0.9;\n  } else if (kind < 2.5) {\n    q.xz = rot(r.w * 6.283) * q.xz;\n    float h = H * (0.6 + 0.4 * r.x);\n    d = sdBox(q - vec3(0.0, h * 0.5, 0.0), vec3(W, h * 0.5, W * 0.38)) - W * 0.18;\n  } else if (kind < 3.5) {\n    d = sdCyl(q - vec3(0.0, H * 0.5, 0.0), W * 0.12, H * 0.5);\n    d = min(d, length(q - vec3(0.0, H + W * 0.55, 0.0)) - W * 0.6);\n  } else if (kind < 4.5) {\n    vec3 g = q; g.x = abs(g.x) - W * 2.2;\n    d = sdBox(g - vec3(0.0, H * 0.5, 0.0), vec3(W * 0.3, H * 0.5, W * 0.3));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.94, 0.0), vec3(W * 3.0, W * 0.28, W * 0.38)));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.74, 0.0), vec3(W * 2.4, W * 0.18, W * 0.26)));\n  } else {\n    d = length(q - vec3(0.0, -H * 0.15, 0.0)) - H * 0.75;\n  }\n  return d;\n}\nfloat shafts(vec3 ro, vec3 rd, float t, float jit) { return 0.0; }\nfloat map(vec3 p) {\n  float d = p.y - groundH(p.xz);\n  d = min(d, setPiece(p));\n  gD = d;\n  float kind = uTr[0];\n  if (kind < 0.5) return d;\n  float S = uTr[1], H = uTr[2], W = uTr[10];\n  float lod = 1.0 - smoothstep(9.0 * S, 13.0 * S, length(p.xz - uCamP.xz));\n  if (lod < 0.01) return d;\n  H *= lod;\n  float top = H * 2.5 + 2.0;\n  if (p.y > top) { d = min(d, p.y - top + 1.0); gD = d; return d; }\n  ivec2 c = ivec2(floor(p.xz / S));\n  vec4 r = cell4(c);\n  vec3 q = vec3(p.x - (float(c.x) + 0.5) * S, p.y, p.z - (float(c.y) + 0.5) * S);\n  float ex = cellExit(q.xz, S);\n  bool odd = isOdd(c);\n  if (r.x < uTr[4] || odd) {\n    q.xz -= (r.yz - 0.5) * S * 0.42 * uTr[3] * (odd ? 0.0 : 1.0);\n    d = min(d, thing(q, kind, H, W, r, odd));\n  }\n  gD = d;\n  return min(d, ex);\n}\nSurf surf(vec3 p, vec3 n, float t) {\n  float gh = groundH(p.xz);\n  if (setPiece(p) < 0.02 + 0.002 * t) return setSurf(p);\n  if (p.y - gh > 0.03 + 0.003 * t || n.y < 0.6) {\n    Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, 1.0);\n    float S = uTr[1];\n    ivec2 c = ivec2(floor(p.xz / S));\n    vec4 r = cell4(c);\n    bool odd = isOdd(c);\n    float kind = uTr[0];\n    bool lamp = kind > 2.5 && kind < 3.5 && p.y > uTr[2] * (odd && uTr[7] > 2.5 && uTr[7] < 3.5 ? 2.4 : 1.0);\n    float on = lamp ? step(r.w, uEv.x * 1.02 - 0.01) : 0.0;\n    if (odd && uTr[7] > 0.5 && uTr[7] < 1.5 && (lamp || kind < 2.5 || kind > 3.5)) on = 1.0;\n    if (on > 0.5) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[PAPER], 0.25); s.glow = lamp ? 1.0 : 0.3; }\n    return s;\n  }\n  Surf s = Surf(uInk[LIT], uInk[SHADE], 0.0, 0.0);\n  float fade = exp(-t * 0.006);\n  if (uTr[9] > 0.5 && uTr[9] < 1.5) {\n    vec2 x = p.xz * 0.16; ivec2 ci = ivec2(floor(x)); vec2 f = fract(x);\n    float d1 = 8.0, d2 = 8.0;\n    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {\n      vec4 r = cell4(ci + ivec2(i, j) + 53);\n      float d = length(vec2(float(i), float(j)) + r.xy - f);\n      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;\n    }\n    float line = 1.0 - smoothstep(0.02, 0.05 + 2.0 * uPix * t, d2 - d1);\n    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.55), line * fade);\n    s.shade = mix(s.shade, uInk[DEEP], line * fade * 0.4);\n  }\n  return s;\n}","post/blur":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel; uniform vec2 uDir;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel, d = uDir * uTexel;\n  vec3 s = texture(uSrc, uv).rgb * 0.2270;\n  s += (texture(uSrc, uv + d * 1.3846).rgb + texture(uSrc, uv - d * 1.3846).rgb) * 0.3162;\n  s += (texture(uSrc, uv + d * 3.2308).rgb + texture(uSrc, uv - d * 3.2308).rgb) * 0.0703;\n  O = vec4(s, 1.0);\n}","post/final":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc, uGlow, uNoise;\nuniform vec2 uOut;\nuniform vec4 uK;\nuniform vec3 uFadeInk;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy / uOut;\n  vec3 c = texture(uSrc, uv).rgb; c *= c;\n  vec3 g = texture(uGlow, uv).rgb; g *= g;\n  c += g * uK.x;\n  vec2 px = gl_FragCoord.xy;\n  float fibre = texture(uNoise, px * vec2(0.0021, 0.011)).r - 0.5;\n  float grain = texture(uNoise, px / 256.0).g - 0.5;\n  float tooth = fibre * 0.6 + grain * 0.8;\n  c *= 1.0 + tooth * uK.y;\n  c += tooth * uK.y * 0.012;\n  c = mix(uFadeInk, c, uK.z);\n  if (uK.w > 0.5) { O = vec4(clamp(texture(uSrc, uv).rgb, 0.0, 1.0), 1.0); O.rgb *= O.rgb; return; }\n  c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));\n  O = vec4(c + (grain) / 255.0, 1.0);\n}","post/glowpre":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel;\n  vec3 s = vec3(0.0);\n  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {\n    vec4 c = texture(uSrc, uv + (vec2(float(i), float(j)) - 0.5) * uTexel * 0.5);\n    s += c.rgb * c.rgb * c.a;\n  }\n  O = vec4(sqrt(s * 0.25), 1.0);\n}","z-main":"out vec4 O;\nvec3 skyBase(vec3 rd) {\n  float e = clamp(rd.y, 0.0, 1.0);\n  float g = pow(1.0 - e, 3.4);\n  vec3 c = mix(uInk[TOP], uInk[LOW], g);\n  vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n  vec2 rxz = normalize(rd.xz + vec2(0.0, 1e-4));\n  float toward = max(dot(rxz, sxz), 0.0);\n  float low = 1.0 - smoothstep(0.0, 0.55, uSunDir.y);\n  float wash = pow(toward, 3.0) * pow(1.0 - e, 5.0) * (0.35 + 0.65 * low);\n  c = mix(c, uInk[GLOW], wash * 0.85);\n  float halo = pow(max(dot(rd, uSunDir), 0.0), 24.0 / max(uSun.y, 0.05));\n  c = mix(c, uInk[GLOW], halo * 0.6 * step(-0.08, uSunDir.y));\n  if (rd.y < 0.0) c = mix(c, mix(uInk[LOW], uInk[SHADE], 0.45), clamp(-rd.y * 4.0, 0.0, 1.0));\n  return c;\n}\nvec3 hazeInk(vec3 rd) { return skyBase(normalize(vec3(rd.x, 0.035, rd.z))); }\nvec3 sky(vec3 rd, out float glow) {\n  glow = 0.0;\n  vec3 c = skyBase(rd);\n  float e = rd.y;\n  if (e < -0.02) return c;\n  if (uSky.z > 0.01) {\n    vec2 u = rd.xz / (abs(e) + 0.35) * 26.0;\n    ivec2 ci = ivec2(floor(u));\n    vec4 r = cell4(ci);\n    if (r.x > 1.0 - 0.07 * uSky.z) {\n      float d = length(fract(u) - 0.5 - (r.yz - 0.5) * 0.7);\n      float rad = max(0.035 + 0.05 * r.w, uPix * 30.0);\n      c = mix(c, uInk[PAPER], smoothstep(rad, rad * 0.45, d) * smoothstep(0.0, 0.25, e) * (0.45 + 0.55 * r.w));\n    }\n  }\n  for (int i = uZero; i < 2; i++) {\n    float r = uBody[i].w;\n    if (r > 0.0) {\n    vec3 dir = uBody[i].xyz;\n    vec3 dl = rd - dir;\n    float d = length(dl);\n    float aa = uPix * 1.2;\n    float disc = smoothstep(r + aa, r - aa, d);\n    if (disc > 0.0) {\n      vec3 side = normalize(cross(dir, vec3(0.0, 1.0, 0.0)));\n      float ph = uBodyK[i].x;\n      float lit = abs(ph) < 0.01 ? 1.0 : smoothstep(-aa, aa, length(dl - side * r * ph * 1.3) - r);\n      vec3 ink = mix(uInk[PAPER], uInk[ACCENT], uBodyK[i].z);\n      c = mix(c, mix(mix(c, uInk[SHADE], 0.25), ink, lit), disc);\n      glow = max(glow, disc * lit * 0.25);\n    }\n    if (uBodyK[i].y > 0.5) {\n      vec3 up = normalize(vec3(0.35, 1.0, 0.2));\n      vec3 sx = normalize(cross(dir, up)), sy = cross(sx, dir);\n      vec2 q = vec2(dot(dl, sx), dot(dl, sy) * 3.6) / r;\n      float ring = abs(length(q) - 1.75);\n      float hide = disc * step(0.0, dot(dl, sy));\n      c = mix(c, uInk[PAPER], smoothstep(0.16, 0.08, ring) * (1.0 - hide) * 0.8);\n    }\n    }\n  }\n  if (uSunDir.y > -0.05) {\n    float d = length(rd - uSunDir), aa = uPix * 1.2;\n    float disc = smoothstep(uSun.x + aa, uSun.x - aa, d);\n    c = mix(c, mix(uInk[PAPER], uInk[GLOW], 0.25), disc);\n    glow = max(glow, disc);\n  }\n  if (uSky.w > 0.001) {\n    float az = atan(rd.x, rd.z);\n    vec3 hz = hazeInk(rd);\n    for (int i = uZero; i < 3; i++) {\n      float fi = float(i);\n      float h = uSky.w * (1.0 - 0.27 * fi) * (0.25 + 0.75 * vnoise1(az * (5.0 + 4.0 * fi) + 19.0 * fi + 3.0))\n              + uSky.w * 0.12 * vnoise1(az * (23.0 + 9.0 * fi) + 7.0 * fi);\n      float m = smoothstep(h + uPix, h - uPix, e);\n      c = mix(c, mix(hz, uInk[SHADE], 0.16 + 0.17 * fi), m);\n      glow *= 1.0 - m;\n    }\n  }\n  if (uSky.x > 0.01 && e > 0.0) {\n    float az = atan(rd.x, rd.z);\n    vec2 u = vec2(az * 1.7 + uTime * 0.002, e * 13.0 * uSky.y);\n    float n = 0.62 * vnoise(u) + 0.38 * vnoise(u * vec2(2.3, 1.9) + 17.0);\n    float th = 0.86 - 0.42 * uSky.x;\n    float band = smoothstep(0.03, 0.12, e) * (1.0 - smoothstep(0.3, 0.5, e));\n    float w = 0.012 + 2.0 * uPix;\n    float m = smoothstep(th, th + w, n) * band;\n    float lip = 1.0 - smoothstep(th + 0.02, th + 0.075, n);\n    vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n    float toward = max(dot(normalize(rd.xz + vec2(0.0, 1e-4)), sxz), 0.0);\n    vec3 body = mix(mix(c, uInk[PAPER], 0.5), uInk[GLOW], 0.45 * toward);\n    vec3 edge = mix(mix(c, uInk[PAPER], 0.85), uInk[GLOW], 0.3 * toward);\n    c = mix(c, mix(body, edge, lip), m);\n    glow *= 1.0 - 0.8 * m;\n  }\n  return c;\n}\nfloat hazeStep(float t) {\n  float h = 1.0 - exp(-t * uAir.x);\n  float n = max(uAir.y, 1.0), x = h * n;\n  return min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);\n}\nvec3 calcN(vec3 p, float h, out float cav) {\n  vec3 n = vec3(0.0); float s = 0.0;\n  gRd = vec3(0.0);\n  for (int i = uZero; i < 4; i++) {\n    vec3 e = 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0);\n    float d = map(p + e * h);\n    n += e * d; s += d;\n  }\n  cav = s / (4.0 * h);\n  return normalize(n);\n}\nfloat discHit(vec3 ro, vec3 rd, vec4 c, vec4 n, out float rr) {\n  rr = 0.0;\n  float R = c.w * n.w;\n  if (R <= 0.001) return -1.0;\n  float dn = dot(rd, n.xyz);\n  if (abs(dn) < 1e-5) return -1.0;\n  float t = dot(c.xyz - ro, n.xyz) / dn;\n  if (t <= 0.0) return -1.0;\n  rr = length(ro + rd * t - c.xyz) / R;\n  return rr < 1.0 ? t : -1.0;\n}\nvoid main() {\n  vec2 fc = gl_FragCoord.xy;\n  vec2 uv = (fc * 2.0 - uRes) / uRes.y;\n  vec3 rd = normalize(uv.x * uCamR + uv.y * uCamU + uCamF);\n  vec3 ro = uCamP;\n  vec3 rd0 = rd, ro0 = ro;\n  float tMin = 0.05;\n  if (uClipOn > 0.5) {\n    float dn = dot(rd, uClip.xyz);\n    float tc = (uClip.w - dot(ro, uClip.xyz)) / (abs(dn) < 1e-5 ? 1e-5 : dn);\n    if (dn > 0.0) tMin = max(tMin, tc);\n  }\n  int nSteps = int(uQ.x), nShadow = int(uQ.z);\n  vec3 acc = vec3(0.0);\n  float wgt = 1.0, glowOut = 0.0, tFirst = FAR, travelled = 0.0, cost = 0.0, tHitP = -1.0;\n  for (int b = uZero; b < 2; b++) {\n    float tMax = FAR; int stop = 0; float rr = 0.0; int pi = 0;\n    if (uSea.x > 0.5 && rd.y < -1e-4) {\n      float ts = (uSea.y - ro.y) / rd.y;\n      if (ts > tMin && ts < tMax) { tMax = ts; stop = 1; }\n    }\n    for (int k = uZero; k < 2; k++) {\n      float r1; float tp = discHit(ro, rd, uPortC[k], uPortN[k], r1);\n      if (tp > tMin && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }\n    }\n    float t = tMin, pd = 1e9, edge = 0.0; bool hit = false, spent = true;\n    gRd = rd;\n    float jit = 0.6 + 0.4 * ign(fc + float(b) * 17.0);\n    for (int i = uZero; i < 200; i++) {\n      if (i >= nSteps) break;\n      float d = map(ro + rd * t);\n      cost += 1.0;\n      if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; break; }\n      if (gD > pd && pd < 1.6 * uPix * t) edge = 1.0;\n      pd = gD;\n      t += d * STEPK * (i == 0 ? jit : 1.0);\n      if (t > tMax) { spent = false; break; }\n    }\n    vec3 c; float g = 0.0; bool bounce = false;\n    if (spent && t < tMax * 0.97) {\n      c = hazeInk(rd);\n      if (b == 0) tFirst = t;\n    } else if (hit && t < tMax) {\n      vec3 p = ro + rd * t;\n      float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);\n      n -= max(0.0, dot(n, rd)) * rd; n = normalize(n);\n      Surf s = surf(p, n, t);\n      if (uEv.z > 0.001) {\n        float k = uEv.z * smoothstep(0.5, 0.78, n.y);\n        s.lit = mix(s.lit, uInk[PAPER], k); s.shade = mix(s.shade, mix(uInk[PAPER], uInk[SHADE], 0.5), k); s.glow *= 1.0 - k;\n      }\n      float ndl = dot(n, uSunDir), sh = 0.0;\n      if (ndl > 0.0 && uSunDir.y > -0.02) {\n        sh = 1.0; float st = 0.02 + 0.004 * t; vec3 sp = p + n * (0.01 + 0.002 * t);\n        gRd = uSunDir;\n        for (int i = uZero; i < 48; i++) {\n          if (i >= nShadow) break;\n          float d = map(sp + uSunDir * st);\n          cost += 1.0;\n          sh = min(sh, uSun.w * d / st);\n          st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);\n          if (sh < 0.02 || st > SHFAR) break;\n        }\n        sh = smoothstep(0.25, 0.6, sh);\n      }\n      float key = smoothstep(-0.02, 0.5, ndl) * sh;\n      float nb = max(uSun.z, 1.0), x = key * nb;\n      float tone = min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);\n      tone = max(tone, uFill.w * smoothstep(0.15, 0.3, dot(n, uFill.xyz)) / nb);\n      vec3 shade = mix(s.shade, mix(s.shade, uInk[TOP], 0.22), clamp(n.y, 0.0, 1.0));\n      c = mix(shade, s.lit, tone);\n      c = mix(c, uInk[DEEP], clamp(-cav * 1.4, 0.0, 0.55) * s.line);\n      c = mix(c, uInk[PAPER], clamp(cav * 0.7, 0.0, 0.22) * s.line * tone);\n      for (int k = uZero; k < 2; k++) {\n        float R = uPortC[k].w * uPortN[k].w;\n        if (R > 0.001) {\n          vec3 lp = uPortC[k].xyz - p; float l2 = dot(lp, lp);\n          float f = R * R / (l2 + R * R) * clamp(dot(n, lp) * inversesqrt(l2) * 0.75 + 0.25, 0.0, 1.0);\n          c = mix(c, uPortInk[k], f * 0.55);\n        }\n      }\n      g = s.glow;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7 * exp(-t * uAir.x * 2.0));\n      if (b == 0) tHitP = t;\n      float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);\n      c = mix(c, mix(hazeInk(rd), uInk[PAPER], 0.45), mist);\n      float hz = hazeStep(travelled + t);\n      c = mix(c, hazeInk(rd), hz * 0.94);\n      g *= 1.0 - hz;\n      if (b == 0) tFirst = t;\n    } else if (stop == 2) {\n      vec3 through = b == 0\n        ? (pi == 0 ? texelFetch(uPortTex0, ivec2(fc), 0).rgb : texelFetch(uPortTex1, ivec2(fc), 0).rgb)\n        : sqrt(uPortInk[pi]);\n      through *= through;\n      float lw = clamp(2.2 * uPix * tMax / (uPortC[pi].w * uPortN[pi].w), 0.004, 0.2);\n      float rim = smoothstep(1.0 - lw, 1.0 - 0.5 * lw, rr);\n      c = mix(through, uInk[PAPER], rim);\n      g = rim * 0.5;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7);\n      if (b == 0) tFirst = tMax;\n    } else if (stop == 1) {\n      vec3 pw = ro + rd * tMax;\n      float far = hazeStep(travelled + tMax);\n      if (b == 0) tFirst = tMax;\n      if (uSea.x > 2.5) {\n        float wv = vnoise2(pw.xz * 0.012 + uTime * 0.01);\n        c = mix(mix(hazeInk(rd), uInk[PAPER], 0.35 + 0.3 * step(0.5, wv)), hazeInk(rd), far * 0.9);\n      } else {\n        float rp = uSea.z * (1.0 - 0.9 * far);\n        vec2 rel = pw.xz - ro0.xz;\n        float dist = length(rel), ld = log(dist + 2.0);\n        float lat = atan(rel.x, rel.y);\n        float w1 = vnoise(vec2(lat * 9.0 + uTime * 0.02, ld * 26.0 - uTime * 0.35));\n        float w2 = vnoise(vec2(lat * 3.0, ld * 9.0 + uTime * 0.12));\n        vec3 nw = normalize(vec3((w2 - 0.5) * 0.05 * rp, 1.0, (w1 - 0.5) * 0.035 * rp));\n        float f0 = uSea.x > 1.5 ? 0.86 : 0.42;\n        float fr = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-rd, nw), 0.0, 1.0), 4.0);\n        float fine = 1.0 - smoothstep(0.12, 0.3, 26.0 * uPix / max(-rd.y, 0.004));\n        float stroke = smoothstep(0.71, 0.74, w1) * smoothstep(0.35, 0.5, w2) * rp * fine;\n        vec3 body = mix(mix(uInk[SHADE], uInk[TOP], 0.5), hazeInk(rd), far * 0.94);\n        body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.5 * (1.0 - far));\n        if (b == 0 && uQ.y > 0.5) {\n          float nearK = 0.4 * (1.0 - smoothstep(4.0, 70.0, dist));\n          fr *= 1.0 - nearK;\n          acc += wgt * (1.0 - fr) * body;\n          wgt *= fr * (1.0 - 0.75 * stroke);\n          ro = pw + vec3(0.0, 0.01, 0.0);\n          rd = reflect(rd, nw); rd.y = max(rd.y, 0.015); rd = normalize(rd);\n          travelled = tMax; tMin = 0.05;\n          nSteps = int(uQ.y);\n          bounce = true;\n        } else {\n          float gs; c = mix(body, sky(reflect(rd, nw), gs), fr);\n        }\n      }\n    } else {\n      c = sky(rd, g);\n    }\n    if (!bounce) { acc += wgt * c; glowOut += wgt * g; break; }\n  }\n  {\n    float sf = shafts(ro0, rd0, min(tFirst, FAR), ign(fc + 7.0));\n    if (sf > 0.0) {\n      float q = (floor(sf * 3.0) + smoothstep(0.3, 0.7, fract(sf * 3.0))) / 3.0;\n      acc = mix(acc, mix(uInk[GLOW], uInk[PAPER], 0.3), min(q, 1.0) * 0.42);\n    }\n  }\n  if (uPart.x > 0.5) {\n    for (int k = uZero; k < 3; k++) {\n      float dk = 5.0 + 9.0 * float(k) * float(k);\n      if (dk < tFirst) {\n      vec3 p = ro0 + rd0 * dk;\n      float cs = 1.6 + 1.3 * float(k);\n      float rain = step(3.5, uPart.x);\n      p.y += uTime * uPart.z * (1.0 + 0.3 * float(k));\n      p.x += uTime * uPart.z * 0.35 + 0.6 * sin(p.y * 0.4 + float(k));\n      vec3 q = p / cs; q.y *= mix(1.0, 0.18, rain);\n      ivec3 ci = ivec3(floor(q));\n      vec4 r = cell4(ci.xy + ci.z * ivec2(37, 17) + k * 91);\n      vec3 f = fract(q) - 0.5 - (r.xyz - 0.5) * 0.6;\n      f.y /= mix(1.0, 0.18, rain);\n      float size = (0.035 + 0.05 * r.x) * uPart.w * mix(1.0, 0.45, rain) / cs * (1.0 + 20.0 * uPix * dk);\n      float m = smoothstep(size, size * 0.6, length(f.xy * vec2(1.0, mix(1.0, 0.1, rain)))) * step(r.w, uPart.y);\n      vec3 ink = uPart.x < 2.5 ? uInk[PAPER] : (uPart.x < 3.5 ? mix(uInk[ACCENT], uInk[PAPER], 0.35) : mix(uInk[PAPER], uInk[LOW], 0.5));\n      acc = mix(acc, ink, m * (uPart.x > 1.5 && uPart.x < 2.5 ? 0.6 : 0.9) * mix(1.0, 0.5, rain));\n      }\n    }\n  }\n  if (uQ.w > 0.5) { acc = vec3(cost / 200.0, cost > 160.0 ? 1.0 : 0.0, 0.0); glowOut = 0.0; }\n  acc = clamp(acc, 0.0, 1.0);\n  vec3 enc = sqrt(acc) + (ign(fc) - 0.5) / 255.0;\n  O = vec4(enc, clamp(glowOut, 0.0, 1.0));\n}"};
 // ---- 00-util.js
 'use strict';
 // ---------- small maths ----------
@@ -360,9 +360,64 @@ const PALETTE_BY_NAME = Object.fromEntries(PALETTES.map((p) => [p.name, p]));
 // A world is a pure function of its key { base, change, heir, age }.
 //   base    the place itself: its form, layout, set piece, event
 //   change  0 for the place as first found; otherwise how this kin differs
-//   heir    something handed down a line of worlds (a moon, a tune)
-// Every trait draws from its own named stream, so new traits never disturb old ones.
+//   heir    what is handed down a line of worlds: a moon and a tune
+//   age     how many plates the heirloom has lasted
+// Every trait draws from its own named stream, so adding a trait later never
+// disturbs the traits a seed already has.
 const FORMS = {};
+
+const numWord = (n) => {
+  n = Math.round(n);
+  const ones = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  if (n < 20) return ones[n];
+  if (n < 100) return tens[(n / 10) | 0] + (n % 10 ? '-' + ones[n % 10] : '');
+  if (n < 1000) return ones[(n / 100) | 0] + ' hundred' + (n % 100 ? ' and ' + numWord(n % 100) : '');
+  return String(n);
+};
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// The set pieces: one colossal thing a world may hold. `tall` and `wide` are in
+// units of the set piece's scale, so sentences can state true sizes.
+const SETS = {
+  1: { noun: 'door', tall: 4, eye: 2.0, line: (m) => `A door ${numWord(m / 3)} storeys high stands here by itself.`, rise: 'It opens as you come.' },
+  2: { noun: 'ball', tall: 2, eye: 1.4, line: (m) => `A ball ${numWord(m)} metres across rests on the ground.`, rise: 'Then it does not rest.' },
+  3: { noun: 'ring', tall: 3.1, eye: 1.55, line: (m) => `A ring ${numWord(m)} metres across stands on its edge, and the way goes through it.`, rise: 'It takes the light as you pass.' },
+  4: { noun: 'tower', tall: 6.3, eye: 5.0, line: (m) => `A tower ${numWord(m)} metres high has one room at the top.`, rise: 'The light in the room is on.' },
+  5: { noun: 'stair', tall: 4.3, eye: 3.2, line: (m) => `A stair climbs ${numWord(m)} metres and stops.`, rise: 'Nothing is at the top.' },
+  6: { noun: 'arch', tall: 3.2, eye: 1.8, line: (m) => `An arch ${numWord(m)} metres high has no wall on either side of it.`, rise: 'The way goes under.' },
+  7: { noun: 'slab', tall: 3.0, eye: 1.8, line: (m) => `A slab ${numWord(m)} metres tall hangs a little off the ground.`, rise: 'It goes up as you watch.' },
+  8: { noun: 'tree', tall: 3.1, eye: 2.2, line: () => 'There is one tree.', rise: 'It is in flower.' },
+};
+
+const CHANGES = {
+  night:   { label: 'at night',       line: 'The same place after dark.' },
+  dusk:    { label: 'at dusk',        line: 'The same place with the sun going.' },
+  dawn:    { label: 'at first light', line: 'The same place before anyone is up.' },
+  noon:    { label: 'at noon',        line: 'The same place with the sun overhead and nowhere to hide.' },
+  flooded: { label: 'flooded',        line: 'The same place. The water came and has not left.' },
+  drained: { label: 'drained',        line: 'The same place with the water gone.' },
+  mist:    { label: 'in mist',        line: 'The same place. The mist has taken everything below the knee.' },
+  snow:    { label: 'under snow',     line: 'The same place. It has been snowing for some time.' },
+  emptied: { label: 'emptied',        line: 'The same place with everything taken away but the ground.' },
+  later:   { label: 'much later',     line: 'The same place a long time afterwards.' },
+};
+
+const MOONS = [
+  { id: 'none',     w: 3 },
+  { id: 'ringed',   w: 2, label: 'ringed moon' },
+  { id: 'red',      w: 2, label: 'red moon' },
+  { id: 'crescent', w: 2, label: 'thin moon' },
+  { id: 'pale',     w: 2, label: 'full moon' },
+  { id: 'twin',     w: 1.5, label: 'pair of moons' },
+];
+
+const MODES = {
+  0: [[0, 2, 3, 7, 8], [0, 3, 5, 7, 10], [0, 1, 5, 7, 8]],
+  1: [[0, 2, 3, 7, 9], [0, 2, 5, 7, 9], [0, 2, 3, 5, 7, 10]],
+  2: [[0, 2, 4, 7, 9], [0, 2, 4, 6, 7, 9, 11], [0, 4, 5, 7, 11]],
+};
+
 const WORLD = {
   formNames() { return Object.keys(FORMS); },
 
@@ -385,32 +440,42 @@ const WORLD = {
       ev: { id: 0, type: 'none', t0: 22, dur: 16 },
       sky: [0.3, 1, 0, 0],
       body: new Float32Array(8), bodyK: new Float32Array(8),
-      part: [0, 0, 0, 1],
-      door: { r: 7, kin: [0, 0], stranger: [0, 0] }, doorsAt: 44,
-      facts: {},
+      part: [0, 0, 0, 1], cover: 0, fill: [0, 1, 0, 0],
+      door: { r: 7, kin: [0, 0], stranger: [9, 7] }, doorsAt: 46,
+      pulse: 0, mistTop: 3, floodTo: 1.2, interior: false,
+      timbres: ['glass', 'bell'], space: 0.6,
+      facts: {}, changeType: null,
     };
     // 1. the place
-    const formPick = S('form');
     const names = Object.keys(FORMS);
-    g.form = key.form && FORMS[key.form] ? key.form : formPick.weighted(names.map((n) => [n, FORMS[n].weight || 1]));
+    g.form = key.form && FORMS[key.form] ? key.form : S('form').weighted(names.map((n) => [n, FORMS[n].weight ?? 1]));
     const F = FORMS[g.form];
     // 2. its inks and its hour
-    const pr = S('ink');
     const pool = PALETTES.filter((p) => !F.hours || F.hours.includes(p.hour));
-    g.pal = key.pal && PALETTE_BY_NAME[key.pal] ? PALETTE_BY_NAME[key.pal] : pr.pick(pool);
+    g.pal = key.pal && PALETTE_BY_NAME[key.pal] ? PALETTE_BY_NAME[key.pal] : S('ink').pick(pool);
     WORLD.light(g, S('light'));
     // 3. the form lays out its ground, set piece and event
     F.build(g, S);
-    // 4. kin: the same place, changed
-    if (key.change) WORLD.change(g, key.change >>> 0);
-    g.inks = g.pal;
+    if (g.set.type) g.set.eye = SETS[g.set.type].eye;
+    // 4. what has been handed down
+    WORLD.heirloom(g, key);
+    // 5. kin: the same place, changed
+    if (key.change) WORLD.change(g, key.change >>> 0, F);
+    // 6. everything derived
     g.inkFlat = new Float32Array(24);
     INK_KEYS.forEach((k, i) => g.inkFlat.set(g.pal[k], i * 3));
+    if (g.ev.type === 'sunset') {
+      const to = PALETTE_BY_NAME[g.ev.toPal] || PALETTES[0];
+      g.ev.toFlat = new Float32Array(24);
+      INK_KEYS.forEach((k, i) => g.ev.toFlat.set(to[k], i * 3));
+    }
     g.doorInk = V.mix(g.pal.glow, g.pal.low, 0.35);
+    WORLD.words(g, F);
+    WORLD.audio(g, key);
     return g;
   },
 
-  // Sun or moon, sky furniture, weather: decided from the palette's hour.
+  // Sun or moon, sky furniture, air: decided from the palette's hour.
   light(g, r) {
     const hour = g.pal.hour;
     const side = r.chance(0.5) ? 1 : -1;
@@ -419,62 +484,282 @@ const WORLD = {
     else { g.sunAz = side * r.range(0.25, 0.8); g.sunEl = r.range(0.3, 0.6); g.sun = [0.05, 0.9, 2, 12]; }
     g.sky = [r.chance(0.7) ? r.range(0.2, 0.75) : 0, r.range(0.7, 1.6), hour === 0 ? r.range(0.6, 1) : (hour === 1 ? r.range(0, 0.35) : 0), r.chance(0.55) ? r.range(0.03, 0.09) : 0];
     g.air = [r.range(0.0011, 0.0026), r.int(5, 8), -100, 0];
+    // by night a little light from the open sky keeps upward faces readable
+    g.fill = hour === 0 ? [0, 1, 0, 0.6] : [0, 1, 0, 0];
   },
 
-  change(g, change) {
-    // filled in with the kin transformations
+  moonKind(heir) { return stream(heir >>> 0, 'moon').weighted(MOONS.map((m) => [m, m.w])); },
+  heirloom(g, key) {
+    const r = stream(key.heir >>> 0, 'moon');
+    const m = r.weighted(MOONS.map((x) => [x, x.w]));
+    g.heir = { id: m.id, label: m.label || null, age: key.age || 0 };
+    if (m.id === 'none' || g.interior) return;
+    // opposite the sun, and high enough to clear the horizon furniture
+    const side = g.sunAz > 0 ? -1 : 1;
+    const az = side * r.range(0.22, 0.5), el = r.range(0.2, 0.36), size = r.range(0.045, 0.085);
+    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    const phase = m.id === 'crescent' ? 0.55 * side : m.id === 'pale' || m.id === 'ringed' ? 0 : r.pick([0, 0.8 * side]);
+    g.body.set([dir[0], dir[1], dir[2], m.id === 'crescent' ? size * 1.2 : size], 0);
+    g.bodyK.set([phase, m.id === 'ringed' ? 1 : 0, m.id === 'red' ? 0.85 : 0, 0], 0);
+    if (m.id === 'twin') {
+      const az2 = az + side * 0.16, el2 = el + 0.09;
+      g.body.set([Math.sin(az2) * Math.cos(el2), Math.sin(el2), Math.cos(az2) * Math.cos(el2), size * 0.45], 4);
+      g.bodyK.set([phase, 0, 0.3, 0], 4);
+    }
+  },
+
+  pickChange(g, change, F) {
     const r = stream(change, 'kind');
-    const others = PALETTES.filter((p) => p !== g.pal);
-    g.pal = r.pick(others);
+    const hour = g.pal.hour;
+    const opts = [];
+    if (hour !== 0 && !g.interior) opts.push(['night', 3]);
+    if (hour !== 1) opts.push([g.pal.temp > 0 ? 'dusk' : 'dawn', 2.5]);
+    if (hour !== 2 && !g.interior) opts.push(['noon', 1.5]);
+    if (g.sea[0] < 0.5 && F.flood !== false) opts.push(['flooded', 3]);
+    if (g.sea[0] > 0.5 && g.sea[0] < 2.5 && F.drain !== false) opts.push(['drained', 2.5]);
+    if (F.mist !== false && g.sea[0] < 2.5) opts.push(['mist', 2]);
+    if (F.snow !== false && !g.interior) opts.push(['snow', 2]);
+    if (F.empty) opts.push(['emptied', 1.5]);
+    if (F.later) opts.push(['later', 2.5]);
+    return { type: r.weighted(opts), r };
+  },
+  change(g, change, F) {
+    const { type, r } = WORLD.pickChange(g, change, F);
+    g.changeType = type;
+    const want = { night: 0, dusk: 1, dawn: 1, noon: 2 }[type];
+    let pool;
+    if (want !== undefined) {
+      pool = PALETTES.filter((p) => p.hour === want && (type === 'dusk' ? p.temp > 0 : type === 'dawn' ? p.temp <= 0.25 : true));
+    } else if (type === 'snow') {
+      pool = ['Milk Glass', 'Pewter', 'First Light', 'Salt Flat', 'Cyanotype', 'Lilac Smoke', 'Prussian'].map((n) => PALETTE_BY_NAME[n]);
+    } else {
+      pool = PALETTES.filter((p) => p !== g.pal && (!F.hours || F.hours.includes(p.hour)));
+    }
+    pool = pool.filter((p) => p !== g.pal);
+    g.pal = r.pick(pool.length ? pool : PALETTES);
+    const keepSky = g.sky[3];
     WORLD.light(g, stream(change, 'light'));
+    g.sky[3] = keepSky;                                    // the far country does not move
+    if (type === 'flooded') { g.sea = [r.chance(0.5) ? 2 : 1, g.floodTo, r.range(0.5, 1), 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
+    else if (type === 'drained') { g.sea = [0, 0, 0, 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
+    else if (type === 'mist') { g.air[2] = g.mistTop; g.air[3] = 0.022; if (g.ev.type === 'mist') g.ev.type = 'none'; }
+    else if (type === 'snow') { g.part = [1, 0.55, 1.6, 1]; g.cover = 0.85; g.sky[0] = Math.max(g.sky[0], 0.5); }
+    else if (type === 'emptied') F.empty(g, r);
+    else if (type === 'later') F.later(g, r);
+    if (type === 'night' && F.night) F.night(g, r);
+    // the heirloom moon moves with the new sun
+    g.body.fill(0); g.bodyK.fill(0);
+    WORLD.heirloom(g, g.key);
+  },
+
+  words(g, F) {
+    const w = F.words(g);
+    let name = w.name, line = w.line;
+    if (g.changeType) {
+      const c = CHANGES[g.changeType];
+      name = `${w.name}, ${c.label}`;
+      line = (F.changeLines && F.changeLines[g.changeType]) || c.line;
+    }
+    if (g.heir.label && g.heir.age >= 2 && !g.interior) {
+      line += ` The ${g.heir.label} has followed for ${numWord(g.heir.age + 1)} plates.`;
+    }
+    g.name = name; g.line = line; g.baseName = w.name;
+  },
+
+  audio(g, key) {
+    const rb = stream(key.base >>> 0, 'sound'), rh = stream(key.heir >>> 0, 'tune');
+    const mode = rb.pick(MODES[g.pal.hour]);
+    const n = rh.int(4, 6), motif = [];
+    let deg = rh.int(0, 2);
+    for (let i = 0; i < n; i++) {
+      motif.push({ deg, oct: 1, beats: i === n - 1 ? 2 : rh.pick([1, 1, 1, 0.5, 2]) });
+      deg += rh.pick([1, 1, 2, -1, -2, 3]); deg = clamp(deg, 0, 7);
+    }
+    g.audio = {
+      seed: (key.base ^ (key.change || 0)) >>> 0,
+      root: 38 + rb.int(0, 14), mode, timbre: rb.pick(g.timbres),
+      tempo: Math.round(mix(44, 66, sat((g.speed - 6) / 16))), motif,
+      bed: g.interior ? 'room' : g.part[0] > 3.5 ? 'rain' : g.sea[0] > 0.5 && g.sea[0] < 2.5 ? 'sea' : g.pal.hour === 0 && rb.chance(0.5) ? 'still' : 'wind',
+      bedLevel: g.interior ? 0.3 : 0.5, bright: [0.25, 0.5, 0.75][g.pal.hour], space: g.space,
+      heirloom: (key.age || 0) > 0,
+    };
   },
 
   // What the world looks like at this moment of the visit. ta is seconds since
   // arrival (drives the event); t is the world's own running clock.
   live(g, ta, t) {
-    const e = g.ev.type === 'none' ? 0 : smooth(0, 1, (ta - g.ev.t0) / g.ev.dur);
+    const ty = g.ev.type;
+    const e = ty === 'none' ? 0 : smooth(0, 1, (ta - g.ev.t0) / g.ev.dur);
     const L = {
-      ev: e, inks: g.inkFlat, tr: g.tr,
-      sun: g.sun, air: g.air.slice(), sea: g.sea.slice(), sky: g.sky, body: g.body, bodyK: g.bodyK, part: g.part,
+      ev: e, inks: g.inkFlat, tr: g.tr, cover: g.cover,
+      sun: g.sun, air: g.air, sea: g.sea, sky: g.sky, body: g.body, bodyK: g.bodyK, part: g.part,
       set: g.set.pos, setMotion: g.set.move, setLit: g.set.lit,
     };
-    let el = g.sunEl, az = g.sunAz;
-    const ty = g.ev.type;
+    let el = g.sunEl;
+    const az = g.sunAz;
     if (ty === 'rise') { L.setMotion = e; L.setLit = e; }
     else if (ty === 'lights') { L.setLit = e; }
-    else if (ty === 'tide') { L.sea[1] = g.sea[1] + g.ev.amount * e; }
-    else if (ty === 'mist') { L.air[2] = mix(g.air[2], g.ev.amount, e); L.air[3] = mix(g.air[3], 0.03, e); }
-    else if (ty === 'sunset') { el = mix(g.sunEl, -0.04, e); }
+    else if (ty === 'tide') { L.sea = g.sea.slice(); L.sea[1] = g.sea[1] + g.ev.amount * e; }
+    else if (ty === 'mist') { L.air = g.air.slice(); L.air[2] = mix(g.air[2] > -50 ? g.air[2] : g.mistTop - 14, g.mistTop, e); L.air[3] = mix(g.air[3], 0.024, e); }
+    else if (ty === 'sunset') {
+      el = mix(g.sunEl, -0.03, e);
+      const a = g.inkFlat, b = g.ev.toFlat, o = L.inks = new Float32Array(24);
+      for (let i = 0; i < 24; i++) o[i] = mix(a[i], b[i], e);
+      L.sky = g.sky.slice(); L.sky[2] = mix(g.sky[2], 0.8, smooth(0.5, 1, e));
+    } else if (ty === 'snow') { L.part = [1, 0.6 * e, 1.5, 1]; L.cover = Math.max(g.cover, 0.8 * smooth(0.25, 1, e)); }
     L.sunDir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     return L;
   },
+
+  // share codes: version, then the four parts of the key in base 36
+  code(key) { return ['1', key.base >>> 0, key.change >>> 0, key.heir >>> 0, key.age | 0].map((v, i) => (i ? (+v).toString(36) : v)).join('.'); },
+  parse(s) {
+    const p = String(s || '').trim().split('.');
+    if (p.length === 5 && p[0] === '1') {
+      const v = p.slice(1).map((x) => parseInt(x, 36));
+      if (v.every(Number.isFinite)) return { base: v[0] >>> 0, change: v[1] >>> 0, heir: v[2] >>> 0, age: clamp(v[3] | 0, 0, 9999), gen: 0 };
+    }
+    const one = codeToSeed(s);
+    return one === null ? null : { base: one, change: 0, heir: one, age: 0, gen: 0 };
+  },
 };
 
-// ---- PLAIN ----
+// ---- 31-form-plain.js
+// ---- PLAIN: one kind of thing repeated across level ground, and one exception ----
 FORMS.plain = {
-  weight: 1,
+  weight: 1.2,
+  THINGS: {
+    1: { one: 'pylon', many: 'pylons', line: (n) => `Pylons stand every ${numWord(n)} metres in every direction.` },
+    2: { one: 'stone', many: 'stones', line: (n) => `Stones were stood on end here, about ${numWord(n)} metres apart.` },
+    3: { one: 'lamp', many: 'lamps', line: (n) => `There is a lamp post every ${numWord(n)} metres and no road.` },
+    4: { one: 'gate', many: 'gates', line: (n) => `Gates stand ${numWord(n)} metres apart, each one leading to the next.` },
+    5: { one: 'dome', many: 'domes', line: (n) => `Something round is buried here every ${numWord(n)} metres or so.` },
+  },
+  ODD: {
+    1: { name: (t) => (t.one === 'lamp' ? 'The Lamp Left On' : `The Painted ${cap(t.one)}`), line: (t) => (t.one === 'lamp' ? 'One of them is on.' : 'One of them has been painted.') },
+    2: { name: (t) => `The Missing ${cap(t.one)}`, line: () => 'One is missing.' },
+    3: { name: (t) => `The Large ${cap(t.one)}`, line: () => 'One is more than twice the size of the others.' },
+    4: { name: (t) => `The Fallen ${cap(t.one)}`, line: () => 'One has fallen over.' },
+  },
   build(g, S) {
     const r = S('plain');
     const kind = r.weighted([[1, 3], [2, 3], [3, 3], [4, 2], [5, 1.5]]);
-    const spacing = r.range(26, 46);
+    const spacing = Math.round(r.range(26, 46));
     const H = { 1: r.range(9, 20), 2: r.range(3.5, 7), 3: r.range(6, 9), 4: r.range(7, 12), 5: r.range(3, 6) }[kind];
     const W = { 1: r.range(0.9, 1.6), 2: r.range(1.1, 1.9), 3: 1.0, 4: r.range(0.8, 1.1), 5: 1 }[kind];
-    const odd = r.int(1, 4);
-    const oz = Math.round((g.speed * r.range(16, 22)) / spacing), ox = r.chance(0.5) ? 0 : -1;
-    g.tr.set([kind, spacing, H, kind === 2 ? 0.8 : r.range(0, 0.25), kind === 5 ? 0.45 : r.range(0.75, 1), ox, oz, odd, r.chance(0.3) ? r.range(2, 6) : 0, r.int(0, 2), W]);
-    g.path.y0 = r.range(3.2, 6.5);
-    g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.01;
-    if (r.chance(0.6)) g.sea = [2, 0.03, r.range(0.35, 1), 0];
-    g.door = { r: 5.5, kin: [0, 0.5], stranger: [spacing * 0.0 + 9, 7] };
-    if (r.chance(0.55)) {
+    g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.012;
+    g.path.y0 = r.range(3.4, 6.5);
+    const hasSet = r.chance(0.5);
+    let odd = kind === 5 ? r.pick([1, 3]) : kind === 3 ? r.pick([1, 2, 3, 4]) : r.int(1, 4);
+    if (hasSet && r.chance(0.5)) odd = 0;
+    // the exception stands beside the line, where the flight will pass it
+    const oz = Math.round((g.speed * r.range(15, 21)) / spacing), ox = r.chance(0.5) ? 0 : -1;
+    g.tr.set([kind, spacing, H, kind === 2 ? 0.8 : r.range(0, 0.22), kind === 5 ? 0.45 : r.range(0.78, 1), odd ? ox : 9999, oz, odd, 0, r.int(0, 1), W]);
+    if (r.chance(0.55)) g.sea = [2, 0.03, r.range(0.4, 1), 0];
+    else if (r.chance(0.4)) g.tr[8] = r.range(2, 5);          // dry ground may roll a little
+    g.floodTo = 0.6; g.mistTop = H * 0.55 + 1;
+    g.door = { r: 5.5, kin: [0, 0.6], stranger: [10, 7.5] };
+    g.pulse = spacing;
+    g.timbres = ['glass', 'bell', 'reed'];
+    g.facts = { kind, spacing, odd, wet: g.sea[0] > 0.5 };
+    if (hasSet) {
       const type = r.pick([1, 2, 3, 4, 5, 6, 7, 8]);
-      const scale = r.range(9, 22);
-      const onLine = type === 3 || type === 6 || type === 1;
-      g.set = { type, pos: [onLine ? 0 : (r.chance(0.5) ? 1 : -1) * r.range(1.2, 2.2) * scale, type === 3 ? -scale * 0.2 : 0, g.speed * r.range(24, 30)], scale, yaw: 0, attend: onLine ? 0.2 : 0.75, eye: 2.6, move: 0, lit: 0 };
-      if (onLine) g.path.y0 = Math.max(g.path.y0, type === 3 ? scale * 1.3 : scale * 1.2) * (type === 1 ? 0.9 : 1), g.set.pos[1] = type === 3 ? g.path.y0 - 1.55 * scale : 0;
-      g.ev = { id: 1, type: 'rise', t0: 10, dur: 14 };
-    } else if (kind === 3) g.ev = { id: 2, type: 'lights', t0: 8, dur: 26 };
+      const scale = type === 8 ? r.range(7, 12) : r.range(9, 20);
+      const onLine = type === 1 || type === 3 || type === 6;
+      const side = (r.chance(0.5) ? 1 : -1) * (type === 4 ? r.range(2.6, 3.8) : r.range(1.4, 2.4)) * scale;
+      g.set = { type, pos: [onLine ? 0 : side, 0, g.speed * r.range(25, 30)], scale, yaw: 0, attend: onLine ? 0.15 : 0.8, eye: 2, move: 0, lit: 0 };
+      if (type === 3) g.path.y0 = 1.55 * scale;                // the way goes through the ring
+      if (type === 1) g.path.y0 = Math.min(g.path.y0, 2.2 * scale);
+      g.ev = { id: 1, type: 'rise', t0: 9, dur: 13 };
+      g.facts.setM = Math.round(SETS[type].tall * scale);
+    } else if (kind === 3 && odd !== 1) {
+      g.ev = { id: 2, type: 'lights', t0: 8, dur: 30 };
+    } else {
+      const pick = r.weighted([['none', 3], ['mist', 2], ['snow', 1.5], ['sunset', g.pal.hour === 1 ? 4 : 0]]);
+      if (pick === 'mist') g.ev = { id: 3, type: 'mist', t0: 14, dur: 22 };
+      else if (pick === 'snow') g.ev = { id: 4, type: 'snow', t0: 10, dur: 22 };
+      else if (pick === 'sunset') g.ev = { id: 5, type: 'sunset', t0: 8, dur: 34, toPal: r.pick(['Lamp Black', 'Indigo Vat', 'Mulberry Night', 'Prussian']) };
+    }
   },
+  words(g) {
+    const f = g.facts, t = this.THINGS[f.kind], bits = [t.line(f.spacing)];
+    let name;
+    if (g.set.type) {
+      const s = SETS[g.set.type];
+      name = `${cap(s.noun)} among ${cap(t.many)}`;
+      bits.push(s.line(f.setM) + (g.ev.type === 'rise' ? ' ' + s.rise : ''));
+    } else {
+      name = f.odd ? this.ODD[f.odd].name(t) : `${cap(t.many)}`;
+      if (f.odd) bits.push(this.ODD[f.odd].line(t));
+      if (g.ev.type === 'lights') bits.push('The others come on one at a time.');
+      else if (g.ev.type === 'sunset') bits.push('The sun goes while you are here.');
+      else if (g.ev.type === 'mist') bits.push('The mist comes up to meet them.');
+      else if (g.ev.type === 'snow') bits.push('It begins to snow.');
+      else if (f.wet) bits.push('The ground is a hand\'s depth of water.');
+    }
+    return { name, line: bits.join(' ') };
+  },
+  changeLines: { later: 'The same field a long time afterwards. Most of them are down.', emptied: 'The same ground with everything taken off it.' },
+  empty(g) { g.tr[0] = 0; g.set.type = 0; if (g.ev.type === 'rise' || g.ev.type === 'lights') g.ev.type = 'none'; },
+  later(g) { g.tr[4] *= 0.4; g.tr[3] = 0.9; g.tr[7] = 4; if (g.ev.type === 'lights') g.ev.type = 'none'; },
+};
+
+// ---- 32-form-cistern.js
+// ---- CISTERN: columns standing in water under a roof with holes in it ----
+FORMS.cistern = {
+  weight: 1,
+  mist: false, snow: false,
+  build(g, S) {
+    const r = S('cistern');
+    const bay = Math.round(r.range(9, 14));
+    const rad = r.range(0.55, 0.95);
+    const arc = r.weighted([[0, 1.5], [1, 2], [2, 3]]);
+    const spring = r.range(4.5, 7.5);
+    const H = arc ? spring + (bay * 0.5 - rad) + r.range(0.6, 2.2) : r.range(8, 14);
+    const hole = r.chance(0.88) ? r.range(0.3, 0.42) * bay : 0;
+    const every = hole ? r.pick([1, 2, 2, 3]) : 1;
+    const odd = r.weighted([[0, 3], [1, 2.5], [2, 1.5], [3, 2]]);
+    g.speed = r.range(4.6, 6.4); g.lead = 34; g.tilt = 0; g.focal = 1.85;
+    g.path.y0 = r.range(2.1, 3.0);
+    const oz = Math.round((g.speed * r.range(15, 21)) / bay), side = r.chance(0.5) ? 1 : -1;
+    const lamps = !hole || r.chance(0.3) ? 1 : 0;
+    g.tr.set([bay, H, spring, rad, r.chance(0.3) ? 1 : 0, arc, hole, every, oz, odd, side, rad * 0.75, lamps, 0]);
+    g.sea = [2, 0, r.range(0.35, 0.8), 0];
+    g.air = [2.6 / (13 * bay), r.int(5, 7), -100, 0];
+    // the light comes down the holes, so the sun stands high
+    g.sunAz = (r.chance(0.5) ? 1 : -1) * r.range(0.35, 1.1); g.sunEl = r.range(0.7, 1.0);
+    g.sun = [0.03, 0.8, 3, 16];
+    g.sky = [0, 1, g.pal.hour === 0 ? 0.8 : 0, 0];
+    g.fill = [-0.25 * Math.sign(g.sunAz), 0.35, -0.9, 1];
+    g.interior = true; g.space = 0.95; g.timbres = ['organ', 'bowed', 'bell'];
+    g.pulse = bay; g.floodTo = 1.4;
+    const clear = Math.min(bay * 0.5 - rad, 2.6) * 0.8;
+    g.door = { r: clear, kin: [0, 0.1], stranger: [0, arc ? Math.min(spring + 0.5, H - clear - 0.8) - g.path.y0 : H - clear - 1.2 - g.path.y0] };
+    g.facts = { bay, H: Math.round(H), odd, hole: !!hole, lamps: !!lamps, arc };
+    const ev = r.weighted([['tide', 3], [lamps ? 'lights' : 'none', 3], ['none', 2]]);
+    if (ev === 'tide') { const down = r.chance(0.5); g.ev = { id: 1, type: 'tide', t0: 10, dur: 30, amount: down ? -0.55 : 1.0 }; g.facts.tide = down ? 'down' : 'up'; }
+    else if (ev === 'lights') g.ev = { id: 2, type: 'lights', t0: 8, dur: 28 };
+  },
+  words(g) {
+    const f = g.facts;
+    const name = f.odd === 1 ? 'The Painted Column' : f.odd === 2 ? 'The Missing Column' : f.odd === 3 ? 'The Broken Column'
+      : f.tide === 'down' ? 'Low Water in the Cistern' : f.tide === 'up' ? 'The Cistern Filling' : f.arc === 2 ? 'The Long Cistern' : f.arc === 1 ? 'The Arcade' : 'The Columns';
+    const bits = [`Columns ${numWord(f.H)} metres high stand in water a hand deep, one every ${numWord(f.bay)} metres.`];
+    if (f.odd === 1) bits.push('One of them has been painted.');
+    else if (f.odd === 2) bits.push('One is missing and the roof has not noticed.');
+    else if (f.odd === 3) bits.push('One is broken off at the knee.');
+    if (f.tide === 'down') bits.push('The water goes down while you are here and leaves a dark line.');
+    else if (f.tide === 'up') bits.push('The water is rising.');
+    else if (g.ev.type === 'lights') bits.push('Someone has left lamps. They come on one at a time.');
+    else if (f.hole && bits.length < 2) bits.push('The light comes down through holes in the roof.');
+    return { name, line: bits.join(' ') };
+  },
+  changeLines: {
+    later: 'The same hall a long time afterwards. The roof has gone and the columns have not.',
+    drained: 'The same hall with the water let out. The floor is stone flags.',
+    flooded: 'The same hall with the water a man deep.',
+  },
+  later(g) { g.tr[13] = 1; g.interior = false; g.sunEl = 0.45; g.air[0] *= 0.55; g.sky[0] = 0.5; g.fill = [0, 1, 0, 0]; },
 };
 
 // ---- 40-engine.js
@@ -597,7 +882,9 @@ const ENG = {
   },
   prepareCandidates() {
     const [kk, sk] = this.childKeys(this.cur);
-    const kin = this.makeRecord(kk);
+    let kin = this.makeRecord(kk);
+    // a kin should differ from this place in a new way, not repeat the last change
+    for (let i = 0; i < 4 && kin.g.changeType === this.cur.g.changeType; i++) { kk.change = mix32(kk.change + 7919) || 1; kin = this.makeRecord(kk); }
     let stranger = this.makeRecord(sk);
     // a stranger must not land on a form whose shader failed on this device
     let tries = 0;
@@ -640,7 +927,14 @@ const ENG = {
     // flight
     let pace = 1;
     if (this.hurry && this.doors) pace = 3.2;
+    const z0 = w.z;
     w.z += g.speed * pace * dt;
+    if (g.pulse > 0 && Math.floor(w.z / g.pulse) !== Math.floor(z0 / g.pulse) && this.on.pulse) this.on.pulse(w);
+    const ev = g.ev;
+    if (ev.type !== 'none' && this.on.event) {
+      if (w.ta >= ev.t0 && w.ta - dt < ev.t0) this.on.event('start', w);
+      if (w.ta >= ev.t0 + ev.dur && w.ta - dt < ev.t0 + ev.dur) this.on.event('peak', w);
+    }
 
     // looking around: springs back to the line of flight when left alone
     const L = this.look;
@@ -777,11 +1071,12 @@ const ENG = {
     GLX.fv('uTr[0]', live.tr);
     GLX.v4('uSet', live.set[0], live.set[1], live.set[2], g.set.scale);
     GLX.v4('uSetK', g.set.type, g.set.yaw, live.setMotion, live.setLit);
-    GLX.v4('uEv', live.ev, g.ev.id, 0, 0);
+    GLX.v4('uEv', live.ev, g.ev.id, live.cover, 0);
     GLX.v4('uSky', ...live.sky);
     gl.uniform4fv(GLX.loc('uBody[0]') || null, live.body);
     gl.uniform4fv(GLX.loc('uBodyK[0]') || null, live.bodyK);
     GLX.v4('uPart', ...live.part);
+    { const f = V.norm(g.fill); GLX.v4('uFill', f[0], f[1], f[2], g.fill[3]); }
     if (clip) { GLX.v4('uClip', clip[0], clip[1], clip[2], clip[3]); GLX.f('uClipOn', 1); } else GLX.f('uClipOn', 0);
     const pc = new Float32Array(8), pn = new Float32Array(8), pk = new Float32Array(6);
     if (doors) {
@@ -858,8 +1153,8 @@ const ENG = {
     GLX.use(this.post.fin);
     GLX.tex('uSrc', 0, this.tg.scene.tex); GLX.tex('uGlow', 1, ga.tex); GLX.tex('uNoise', 2, this.noise);
     GLX.v2('uOut', this.cw, this.ch);
-    GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, 0);
-    GLX.v3('uFadeInk', w.g.inks.paper);
+    GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, this.debug);
+    GLX.v3('uFadeInk', w.g.pal.paper);
     GLX.draw(null, this.cw, this.ch);
     return true;
   },
@@ -887,6 +1182,1017 @@ const ENG = {
         this.budget = Math.min(this.budgetMax, this.budget * 1.15); G.hold = 0; this.resize();
       }
     } else G.hold = 0;
+  },
+};
+
+// ---- 50-audio.js
+// ---------- sound: the score ----------
+// Each world is a short composition, not a texture. On arrival its motif is
+// stated once, then there is a deliberate rest, then sparse fragments of the
+// same motif with silence between them. Underneath sits one quiet drone and
+// one noise bed. Never more than three pitched lines sound together, and all
+// pitched material in a world uses that world's single timbre.
+//
+// Signal path:  voices, beds -> dry bus ----------------------> limiter -> out
+//                            -> send -> generated-impulse reverb ^
+//
+// Timing: everything is scheduled on the context clock with AudioParam
+// automation. AUDIO.tick() looks a little way ahead and commits whatever falls
+// inside that window, so it works the same in a realtime context and in an
+// OfflineAudioContext that is stepped with suspend() and resume().
+
+const AU_MAXV = 3;      // pitched lines allowed at once, the drone included
+const AU_LEAD = 0.8;    // seconds a melody line is reserved before its first note
+const AU_LOOK = 0.3;    // scheduler horizon when ticks arrive at frame rate
+const AU_EPS = 0.001;   // a portal tone below this is treated as silent
+
+// One synthesis recipe per timbre. att/dec/rel are seconds (dec and rel are time
+// constants), sus is the held level after the decay, perc marks struck timbres
+// that ring down instead of holding, norm brings a held tone to unit RMS and
+// hit scales the peak of a played note.
+const AU_TM = {
+  glass:  { perc: true,  att: 0.006, dec: 0.9, sus: 0,    rel: 0.16, norm: 1.40, hit: 1.25 },
+  reed:   { perc: false, att: 0.09,  dec: 0.4, sus: 0.8,  rel: 0.11, norm: 1.16, hit: 0.80 },
+  bowed:  { perc: false, att: 0.32,  dec: 0.6, sus: 0.86, rel: 0.26, norm: 2.10, hit: 0.80 },
+  bell:   { perc: true,  att: 0.004, dec: 1.7, sus: 0,    rel: 0.24, norm: 1.40, hit: 1.15 },
+  breath: { perc: false, att: 0.16,  dec: 0.5, sus: 0.82, rel: 0.2,  norm: 53.0, hit: 1.00 },
+  organ:  { perc: false, att: 0.2,   dec: 0.5, sus: 0.9,  rel: 0.18, norm: 1.10, hit: 0.90 },
+};
+const AU_BEDS = ['wind', 'sea', 'room', 'rain', 'still'];
+// Bed gains at bedLevel 1. Each is set so the bed sits far below the notes.
+const AU_BEDN = { wind: 0.15, sea: 0.16, room: 0.2, rain: 0.085, still: 0.0025 };
+// Linear levels of each role, before the limiter. Nothing here is loud.
+const AU_LV = {
+  note: 0.115, drone: 0.021, fifth: 0.011, swell: 0.03, portal: 0.07,
+  pivot: 0.075, peak: 0.105, pluck: 0.036, breath: 0.05,
+};
+const AU_OUT = 0.95;    // output trim after the limiter (see au_build)
+
+let au_ctx = null;      // the BaseAudioContext in use
+let au_own = false;     // true when init created the context itself
+let au_rt = false;      // true for a realtime context (resume and suspend exist)
+let au_m = null;        // master chain nodes and shared buffers
+let au_world = null;    // the world being scored
+let au_kin = null;      // kin portal tone
+let au_str = null;      // stranger portal tone
+let au_destKey = '';
+const au_pw = [0, 0];   // wanted portal gains, kin and stranger, 0..1
+let au_on = true;
+let au_paused = false;
+let au_pauseT = 0;
+let au_timer = 0;
+let au_suspT = 0;
+let au_lastTick = -1;
+let au_horizon = AU_LOOK;
+let au_lastPulse = -9;
+let au_pulseAlt = 0;
+let au_lvl = 0;
+let au_lvlBuf = null;
+const au_stat = { live: 0, voices: 0, maxVoices: 0, notes: 0, pulses: 0, first: null };
+
+const au_mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
+// move a MIDI note by octaves into [lo, lo + 12)
+const au_fold = (m, lo) => lo + ((((m - lo) % 12) + 12) % 12);
+const au_want = (near, look) => {
+  const n = sat(+near || 0);
+  return n * n * (0.35 + 0.65 * sat(+look || 0));
+};
+
+// ---------- node bookkeeping ----------
+// A group is the set of nodes behind one voice or one bed. All its sources stop
+// at the same time; when the first one ends, every node is disconnected.
+function au_group() { return { srcs: [], nodes: [], done: false }; }
+function au_arm(G, cb) {
+  au_stat.live++;
+  G.srcs[0].onended = () => {
+    if (G.done) return;
+    G.done = true;
+    au_stat.live--;
+    for (const n of G.nodes) { try { n.disconnect(); } catch (e) { /* already gone */ } }
+    G.nodes.length = 0; G.srcs.length = 0;
+    if (cb) cb();
+  };
+}
+function au_end(G, t) {
+  for (const s of G.srcs) { try { s.stop(t); } catch (e) { /* already ended */ } }
+}
+
+// ---------- generated buffers ----------
+function au_noiseBuf(ctx, secs, label) {
+  const n = Math.floor(ctx.sampleRate * secs), buf = ctx.createBuffer(2, n, ctx.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const r = stream(0x4b494e + ch, label), d = buf.getChannelData(ch);
+    let sum = 0;
+    for (let i = 0; i < n; i++) { d[i] = r() * 2 - 1; sum += d[i]; }
+    const mean = sum / n;
+    for (let i = 0; i < n; i++) d[i] -= mean;
+  }
+  return buf;
+}
+// Rain: mostly silence, with short decaying grains at random moments.
+function au_sparseBuf(ctx, secs) {
+  const sr = ctx.sampleRate, n = Math.floor(sr * secs), buf = ctx.createBuffer(2, n, sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const r = stream(0x5241494e + ch, 'au-rain'), d = buf.getChannelData(ch);
+    const drops = Math.floor(secs * 80);
+    for (let k = 0; k < drops; k++) {
+      const i0 = Math.floor(r() * (n - sr * 0.02)), len = Math.floor(sr * r.range(0.0015, 0.005));
+      const a = 0.35 + 0.65 * r() * r();
+      for (let i = 0; i < len; i++) d[i0 + i] += (r() * 2 - 1) * a * Math.exp(-5 * i / len) * Math.min(1, i / 6);
+    }
+  }
+  return buf;
+}
+// Reverb impulse: seeded noise under an exponential decay that reaches -60 dB at
+// 3.5 s, through a one-pole lowpass that closes as the tail dies (air absorbs
+// the top first).
+function au_impulse(ctx) {
+  const sr = ctx.sampleRate, n = Math.floor(sr * 3.5), buf = ctx.createBuffer(2, n, sr);
+  for (let ch = 0; ch < 2; ch++) {
+    const r = stream(0x524f4f4d + ch, 'au-ir'), d = buf.getChannelData(ch);
+    let lp = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      const fc = mix(5200, 1100, sat(t / 2.5));
+      lp += (1 - Math.exp(-TAU * fc / sr)) * ((r() * 2 - 1) - lp);
+      d[i] = lp * Math.exp(-t / 0.507) * sat(t / 0.012) * sat((3.5 - t) / 0.06);
+    }
+  }
+  return buf;
+}
+
+// ---------- master chain ----------
+function au_build(ctx) {
+  const m = {};
+  m.dry = ctx.createGain();
+  m.send = ctx.createGain();
+  m.sendHp = ctx.createBiquadFilter();           // keep the drone's lows out of the tail
+  m.sendHp.type = 'highpass'; m.sendHp.frequency.value = 170; m.sendHp.Q.value = 0.5;
+  m.conv = ctx.createConvolver();
+  m.conv.buffer = au_impulse(ctx);
+  m.wet = ctx.createGain(); m.wet.gain.value = 1;
+  m.hp = ctx.createBiquadFilter();               // no DC, no subsonics
+  m.hp.type = 'highpass'; m.hp.frequency.value = 28; m.hp.Q.value = 0.5;
+  // Used as a limiter. Everything normally sits well under the threshold. The
+  // node adds its own make-up gain, which AU_OUT takes into account.
+  m.comp = ctx.createDynamicsCompressor();
+  m.comp.threshold.value = -9; m.comp.knee.value = 5; m.comp.ratio.value = 20;
+  m.comp.attack.value = 0.003; m.comp.release.value = 0.25;
+  m.trim = ctx.createGain(); m.trim.gain.value = AU_OUT;
+  m.duck = ctx.createGain();                     // pause
+  m.out = ctx.createGain();                      // enable / disable
+  m.out.gain.value = au_on ? 1 : 0;
+  m.dry.connect(m.hp);
+  m.send.connect(m.sendHp); m.sendHp.connect(m.conv); m.conv.connect(m.wet); m.wet.connect(m.hp);
+  m.hp.connect(m.comp); m.comp.connect(m.trim); m.trim.connect(m.duck); m.duck.connect(m.out);
+  m.out.connect(ctx.destination);
+  try {
+    m.an = ctx.createAnalyser(); m.an.fftSize = 512;
+    m.out.connect(m.an);
+    au_lvlBuf = new Float32Array(m.an.fftSize);
+  } catch (e) { m.an = null; }
+  m.noise = au_noiseBuf(ctx, 6, 'au-noise');
+  m.sparse = au_sparseBuf(ctx, 7);
+  return m;
+}
+
+// ---------- timbres ----------
+// Builds the tone generator for one voice into group G and returns its output
+// node (unit level) plus the list of parameters that follow the pitch, so a held
+// tone can be retuned. Envelopes are applied by the caller.
+//   o.sus    a held tone (drone, portal, swell, pivot) rather than a played note
+//   o.pluck  a muted tick: no slow internal motion
+function au_norm(tm, f) {
+  let k = AU_TM[tm].norm * clamp(Math.pow(f / 220, -0.25), 0.62, 1.4);
+  if (tm === 'breath' && f > 420) k *= Math.sqrt(420 / f);   // its band widens with pitch
+  return k;
+}
+function au_tone(G, tm, f, t, o) {
+  const c = au_ctx, sus = !!o.sus, pluck = !!o.pluck;
+  const br = o.bright == null ? 0.5 : o.bright;
+  const out = c.createGain(), tun = [];
+  G.nodes.push(out);
+  const osc = (type, mult, cents) => {
+    const n = c.createOscillator();
+    n.type = type; n.frequency.value = f * mult;
+    if (cents) n.detune.value = cents;
+    tun.push([n.frequency, mult]);
+    G.srcs.push(n); G.nodes.push(n); n.start(t);
+    return n;
+  };
+  const gn = (v) => { const n = c.createGain(); n.gain.value = v; G.nodes.push(n); return n; };
+  const bq = (type, mult, q) => {
+    const n = c.createBiquadFilter();
+    n.type = type; n.frequency.value = Math.min(f * mult, 15000); n.Q.value = q;
+    tun.push([n.frequency, mult]); G.nodes.push(n);
+    return n;
+  };
+  if (tm === 'reed') {
+    // saw and square through a lowpass: hollow, a little nasal; vibrato arrives late
+    const lp = bq('lowpass', mix(2.4, 5, br), 1.3);
+    const a = osc('sawtooth', 1), b = osc('square', 1), ga = gn(0.55), gb = gn(0.45);
+    a.connect(ga); ga.connect(lp); b.connect(gb); gb.connect(lp); lp.connect(out);
+    if (!pluck) {
+      const l = c.createOscillator(), lg = gn(0);
+      l.frequency.value = 4.7;
+      lg.gain.setValueAtTime(0, t); lg.gain.setTargetAtTime(sus ? 4 : 7, t + 0.2, 0.35);
+      l.connect(lg); lg.connect(a.detune); lg.connect(b.detune);
+      G.srcs.push(l); G.nodes.push(l); l.start(t);
+    }
+  } else if (tm === 'bowed') {
+    // two saws a few cents apart; the lowpass opens as the bow takes hold
+    const m0 = mix(2.6, 5, br), lp = bq('lowpass', m0, 0.9);
+    if (!sus && !pluck) {
+      lp.frequency.setValueAtTime(f * 1.3, t);
+      lp.frequency.setTargetAtTime(Math.min(f * m0, 15000), t, 0.28);
+    }
+    const a = osc('sawtooth', 1, -7), b = osc('sawtooth', 1, 7), g = gn(0.5);
+    a.connect(g); b.connect(g); g.connect(lp); lp.connect(out);
+  } else if (tm === 'bell') {
+    // FM at an inharmonic ratio; the index falls away after the strike
+    const car = osc('sine', 1), mod = osc('sine', 1.4), mg = gn(0);
+    const hi = osc('sine', 2.76), hg = gn(0);
+    if (sus) {
+      mg.gain.value = f * 1.4 * 0.45; tun.push([mg.gain, 1.4 * 0.45]);
+      hg.gain.value = 0.03;
+    } else {
+      mg.gain.setValueAtTime(f * 1.4 * (pluck ? 1.1 : 2.1), t);
+      mg.gain.setTargetAtTime(f * 1.4 * 0.2, t, pluck ? 0.04 : 0.45);
+      hg.gain.setValueAtTime(0.15, t); hg.gain.setTargetAtTime(0, t, 0.3);
+    }
+    mod.connect(mg); mg.connect(car.frequency); car.connect(out);
+    hi.connect(hg); hg.connect(out);
+  } else if (tm === 'breath') {
+    // noise through a narrow resonance at the pitch, a weaker one an octave up,
+    // a trace of air above, and a faint sine that steadies the pitch
+    const src = c.createBufferSource();
+    src.buffer = au_m.noise; src.loop = true;
+    G.srcs.push(src); G.nodes.push(src); src.start(t, (f * 0.137 + t * 0.61) % 5);
+    const q = pluck ? 9 : clamp(f / 14, 6, 30);
+    const b1 = bq('bandpass', 1, q), b2 = bq('bandpass', 2, q * 0.8), g2 = gn(0.22);
+    const air = c.createBiquadFilter(), ga = gn(sus ? 0.003 : 0.006);
+    air.type = 'bandpass'; air.frequency.value = 2400 + 2600 * br; air.Q.value = 0.6;
+    G.nodes.push(air);
+    for (const n of [b1, b2, air]) { n.channelCount = 1; n.channelCountMode = 'explicit'; }
+    src.connect(b1); b1.connect(out);
+    src.connect(b2); b2.connect(g2); g2.connect(out);
+    src.connect(air); air.connect(ga); ga.connect(out);
+    const s = osc('sine', 1), sg = gn(0.009);
+    s.connect(sg); sg.connect(out);
+  } else if (tm === 'organ') {
+    // four sine partials, like a small flue stop
+    for (const [mult, a] of [[1, 1], [2, 0.5], [3, 0.26], [4, 0.13]]) {
+      const p = osc('sine', mult), g = gn(a);
+      p.connect(g); g.connect(out);
+    }
+  } else {
+    // glass: a sine with one soft inharmonic partial, and a brighter one at the strike
+    const a = osc('sine', 1), b = osc('sine', 2.756), gb = gn(0);
+    a.connect(out); b.connect(gb); gb.connect(out);
+    if (sus) gb.gain.value = 0.05;
+    else {
+      gb.gain.setValueAtTime(0.16, t); gb.gain.setTargetAtTime(0.015, t, 0.2);
+      const d = osc('sine', 5.404), gd = gn(0);
+      gd.gain.setValueAtTime(0.06, t); gd.gain.setTargetAtTime(0, t, 0.06);
+      d.connect(gd); gd.connect(out);
+    }
+  }
+  out.gain.value = au_norm(tm, f);
+  return { out, tun };
+}
+
+// ---------- played notes ----------
+// n: { midi, dur, vel, kind, last }  kind is 'mel', 'peak' or 'pluck'.
+function au_note(w, n, t) {
+  const c = au_ctx, sp = w.spec, P = AU_TM[sp.timbre], G = au_group();
+  const pluck = n.kind === 'pluck', soft = n.kind === 'peak';
+  const tone = au_tone(G, sp.timbre, au_mtof(n.midi), t, { bright: sp.bright, pluck });
+  const env = c.createGain();
+  env.gain.value = 0; G.nodes.push(env);
+  tone.out.connect(env); env.connect(w.pitch);
+  const e = env.gain;
+  let att, tOff, rel;
+  e.setValueAtTime(0, t);
+  if (pluck) {
+    att = 0.004; rel = 0.03; tOff = t + 0.3;
+    e.linearRampToValueAtTime(n.vel * AU_LV.pluck * P.hit, t + att);
+    e.setTargetAtTime(0, t + att, 0.045);
+  } else if (P.perc) {
+    const pk = n.vel * (soft ? AU_LV.peak : AU_LV.note) * P.hit;
+    att = soft ? 0.05 : P.att; rel = P.rel;
+    e.linearRampToValueAtTime(pk, t + att);
+    e.setTargetAtTime(0, t + att, soft ? 2.4 : clamp(n.dur * 0.9, 0.45, P.dec));
+    tOff = t + n.dur + (n.last ? P.dec * 1.5 : 0.4);
+  } else {
+    const pk = n.vel * (soft ? AU_LV.peak : AU_LV.note) * P.hit;
+    att = Math.min(soft ? 0.5 : P.att, n.dur * 0.45);
+    rel = P.rel * (n.last || soft ? 1.8 : 1);
+    e.linearRampToValueAtTime(pk, t + att);
+    e.setTargetAtTime(pk * P.sus, t + att, P.dec);
+    tOff = t + n.dur * (n.last ? 1 : 0.96);
+  }
+  e.setTargetAtTime(0, tOff, rel);
+  au_end(G, tOff + 8 * rel + 0.05);
+  const v = {
+    G, tA: t + att, tOff,
+    // let go early: a later note on the same line takes over
+    damp(td, tau) {
+      const x = Math.max(td, v.tA + 0.004);
+      if (x >= v.tOff) return;
+      v.tOff = x;
+      e.setTargetAtTime(0, x, tau);
+      au_end(G, x + 8 * tau + 0.05);
+    },
+  };
+  w.live.add(v);
+  au_arm(G, () => w.live.delete(v));
+  return v;
+}
+
+// ---------- held tones ----------
+// tone -> [lowpass] -> [breathing gain] -> level gain -> dip gain -> dest(s)
+//   o.lp       lowpass cutoff as a multiple of the pitch (0 for none)
+//   o.breathe  [seconds, seconds]: periods of the slow level and filter motion
+//   o.extra    further nodes to disconnect together with this voice
+function au_hold(tm, midi, t, dest, o) {
+  const c = au_ctx, G = au_group(), f = au_mtof(midi);
+  const tone = au_tone(G, tm, f, t, { sus: true, bright: o.bright });
+  let node = tone.out, filt = null;
+  if (o.lp) {
+    filt = c.createBiquadFilter();
+    filt.type = 'lowpass'; filt.Q.value = 0.6; filt.frequency.value = Math.min(f * o.lp, 15000);
+    G.nodes.push(filt); node.connect(filt); node = filt;
+  }
+  if (o.breathe) {
+    const amp = c.createGain(), l1 = c.createOscillator(), d1 = c.createGain();
+    l1.frequency.value = 1 / o.breathe[0]; d1.gain.value = 0.22;
+    l1.connect(d1); d1.connect(amp.gain);
+    G.srcs.push(l1); G.nodes.push(amp, l1, d1); l1.start(t);
+    if (filt) {
+      const l2 = c.createOscillator(), d2 = c.createGain();
+      l2.frequency.value = 1 / o.breathe[1]; d2.gain.value = 420;      // cents
+      l2.connect(d2); d2.connect(filt.detune);
+      G.srcs.push(l2); G.nodes.push(l2, d2); l2.start(t);
+    }
+    node.connect(amp); node = amp;
+  }
+  const g = c.createGain(), dip = c.createGain();
+  g.gain.value = 0; g.gain.setValueAtTime(0, t);
+  node.connect(g); g.connect(dip);
+  for (const d of [].concat(dest)) dip.connect(d);
+  G.nodes.push(g, dip);
+  if (o.extra) for (const x of o.extra) G.nodes.push(x);
+  au_arm(G);
+  return { G, g, dip, filt, tone, tm, midi, lp: o.lp || 0, open: 1, lvl: 0, busy: 0 };
+}
+// Approach a new level. Skips the call when nothing meaningful changed, so a
+// per-frame caller does not pile up automation events.
+function au_set(h, v, t, tau) {
+  if (v === h.lvl) return;
+  if (v !== 0 && h.lvl !== 0 && Math.abs(v - h.lvl) < 0.0006) return;
+  h.lvl = v;
+  h.g.gain.setTargetAtTime(v, t, tau);
+}
+// Change pitch without a slide: dip, retune in the trough, come back.
+function au_retune(h, midi, t) {
+  const f = au_mtof(midi), tt = t + 0.52;
+  h.dip.gain.setTargetAtTime(0, t, 0.13);
+  for (const [p, mult] of h.tone.tun) p.setTargetAtTime(f * mult, tt, 0.02);
+  h.tone.out.gain.setTargetAtTime(au_norm(h.tm, f), tt, 0.02);
+  if (h.filt) h.filt.frequency.setTargetAtTime(Math.min(f * h.lp * h.open, 15000), tt, 0.02);
+  h.dip.gain.setTargetAtTime(1, tt + 0.08, 0.4);
+  h.midi = midi; h.busy = tt + 1.5;
+}
+function au_kill(h, t, tau) {
+  h.lvl = 0;
+  h.g.gain.setTargetAtTime(0, t, tau);
+  au_end(h.G, t + 8 * tau + 0.05);
+}
+
+// ---------- beds ----------
+function au_bed(w, t, delay) {
+  const c = au_ctx, sp = w.spec, G = au_group(), r = stream(sp.seed, 'au-bed');
+  const out = c.createGain();
+  G.nodes.push(out);
+  out.gain.value = 0; out.gain.setValueAtTime(0, t);
+  out.gain.setTargetAtTime(AU_BEDN[sp.bed] * sp.bedLevel, t + delay, 2);
+  out.connect(w.fb);
+  const src = (buf) => {
+    const n = c.createBufferSource();
+    n.buffer = buf; n.loop = true;
+    G.srcs.push(n); G.nodes.push(n); n.start(t, r() * (buf.duration - 0.1));
+    return n;
+  };
+  const bq = (type, f, q) => {
+    const n = c.createBiquadFilter();
+    n.type = type; n.frequency.value = f; n.Q.value = q; G.nodes.push(n);
+    return n;
+  };
+  const gn = (v) => { const n = c.createGain(); n.gain.value = v; G.nodes.push(n); return n; };
+  const lfo = (period, depth, target) => {
+    const l = c.createOscillator(), d = gn(depth);
+    l.frequency.value = 1 / period;
+    l.connect(d); d.connect(target);
+    G.srcs.push(l); G.nodes.push(l); l.start(t);
+  };
+  if (sp.bed === 'wind') {
+    // a band that wanders, with gusts
+    const bp = bq('bandpass', mix(330, 760, sp.bright), 1.4), gust = gn(0.7);
+    lfo(r.range(13, 19), 650, bp.detune); lfo(r.range(37, 53), 380, bp.detune);
+    lfo(r.range(9, 13), 0.28, gust.gain);
+    src(au_m.noise).connect(bp); bp.connect(gust); gust.connect(out);
+  } else if (sp.bed === 'sea') {
+    // low surf that comes in about every eight seconds and brightens as it does
+    const lp = bq('lowpass', 480, 0.5), swell = gn(0.55);
+    lfo(8, 0.4, swell.gain); lfo(13, 0.1, swell.gain); lfo(8, 620, lp.detune);
+    src(au_m.noise).connect(lp); lp.connect(swell); swell.connect(out);
+  } else if (sp.bed === 'room') {
+    // the hum of an enclosed place
+    const lp = bq('lowpass', 115, 0.7), hp = bq('highpass', 38, 0.7);
+    src(au_m.noise).connect(lp); lp.connect(hp); hp.connect(out);
+  } else if (sp.bed === 'rain') {
+    // separate grains, bright, over a trace of hiss
+    const hp = bq('highpass', 1700, 0.7), pk = bq('peaking', 5200, 0.8), hiss = bq('highpass', 5200, 0.7), hg = gn(0.012);
+    pk.gain.value = 5;
+    src(au_m.sparse).connect(hp); hp.connect(pk); pk.connect(out);
+    src(au_m.noise).connect(hiss); hiss.connect(hg); hg.connect(out);
+  } else {
+    // still: no noise at all, a faint cluster of high sines that beat slowly
+    const top = au_fold(sp.root, 84);
+    const degs = [0, sp.mode.includes(7) ? 7 : sp.mode[2], 12 + sp.mode[1]];
+    degs.forEach((d, i) => {
+      for (const off of [0, r.range(0.25, 0.9)]) {
+        const o = c.createOscillator(), g = gn(i === 0 ? 1 : 0.7);
+        o.frequency.value = au_mtof(top + d) + off;
+        o.connect(g); g.connect(out);
+        G.srcs.push(o); G.nodes.push(o); o.start(t);
+      }
+    });
+  }
+  au_arm(G);
+  w.groups.push(G);
+}
+
+// ---------- spec handling ----------
+// The spec belongs to the world generator. Copy it, and tolerate a bad one.
+function au_clean(s) {
+  s = s || {};
+  const num = (v, d) => (Number.isFinite(+v) && v != null ? +v : d);
+  let mode = Array.isArray(s.mode) ? s.mode.map((x) => Math.round(+x)).filter((x) => x >= 0 && x < 12) : [];
+  mode = Array.from(new Set(mode)).sort((a, b) => a - b);
+  if (mode[0] !== 0) mode.unshift(0);
+  if (mode.length < 3) mode = [0, 2, 4, 7, 9];
+  let motif = Array.isArray(s.motif) ? s.motif.filter(Boolean).map((n) => ({
+    deg: Math.round(num(n.deg, 0)), oct: clamp(Math.round(num(n.oct, 1)), -2, 4), beats: clamp(num(n.beats, 1), 0.25, 8),
+  })) : [];
+  if (motif.length < 2) motif = [{ deg: 0, oct: 1, beats: 1 }, { deg: 2, oct: 1, beats: 1 }, { deg: 1, oct: 1, beats: 1 }, { deg: 0, oct: 1, beats: 2 }];
+  return {
+    seed: num(s.seed, 1) >>> 0,
+    root: clamp(Math.round(num(s.root, 45)), 24, 72),
+    mode,
+    timbre: Object.prototype.hasOwnProperty.call(AU_TM, s.timbre) ? s.timbre : 'glass',
+    tempo: clamp(num(s.tempo, 54), 30, 120),
+    motif,
+    bed: AU_BEDS.includes(s.bed) ? s.bed : 'still',
+    bedLevel: sat(num(s.bedLevel, 0.5)),
+    bright: sat(num(s.bright, 0.5)),
+    space: sat(num(s.space, 0.5)),
+    heirloom: !!s.heirloom,
+  };
+}
+// scale degree (may run past the mode in either direction) to a MIDI note
+function au_pitch(sp, deg, oct) {
+  const n = sp.mode.length, k = ((deg % n) + n) % n;
+  return sp.root + 12 * (oct + Math.floor(deg / n)) + sp.mode[k];
+}
+// A pitch class held across a crossing: shared by both modes where possible,
+// and weightier the more it matters to each world. Otherwise the new root.
+function au_pivotPc(a, b) {
+  const pcs = (sp) => sp.mode.map((x) => (sp.root + x) % 12);
+  const wgt = (sp, pc) => {
+    const d = (((pc - sp.root) % 12) + 12) % 12;
+    return d === 0 ? 3 : d === 7 ? 2 : d === 3 || d === 4 ? 1.5 : 1;
+  };
+  const pb = pcs(b);
+  let best = b.root % 12, score = -1;
+  for (const pc of pcs(a)) {
+    if (!pb.includes(pc)) continue;
+    const s = wgt(a, pc) + wgt(b, pc) + (pc === b.root % 12 ? 0.25 : 0);
+    if (s > score) { score = s; best = pc; }
+  }
+  return best;
+}
+
+// ---------- a world ----------
+//   o.delay, o.rise   when and how fast the drone comes up
+//   o.first           seconds until the motif is stated
+//   o.oldUntil        a world being left is still fading until then
+//   o.pivotUntil      a pivot note is still held until then
+function au_makeWorld(spec, t, o) {
+  const c = au_ctx, sp = au_clean(spec), rs = stream(sp.seed, 'au-score');
+  const w = {
+    spec: sp, t0: t, rs, q: [], live: new Set(), groups: [], dead: false, voice: null,
+    st: { kind: 'first', at: t + o.first },
+    mel: { from: -9, until: -9, kind: '' },
+    home: true, moveAt: t + rs.range(20, 40),
+    swell: null, swellOn: false, swellT: 0, swellGone: 0,
+    oldUntil: o.oldUntil || 0, pivotUntil: o.pivotUntil || 0,
+    fifthOn: false, fifthOff: -9, pulseSeen: -9, pulseOK: false, pulseAt: -9,
+    devN: 0, lastVar: '',
+  };
+  // buses: pitched material passes the world's brightness filter; pitched and
+  // bed each have a fade gain so the whole world can leave together
+  w.pitch = c.createGain();
+  w.tone = c.createBiquadFilter();
+  w.tone.type = 'lowpass'; w.tone.Q.value = 0.5; w.tone.frequency.value = 1400 * Math.pow(2, 3 * sp.bright);
+  w.fp = c.createGain(); w.fb = c.createGain();
+  const dry = c.createGain(), snd = c.createGain(), bsnd = c.createGain();
+  dry.gain.value = 1 - 0.3 * sp.space; snd.gain.value = mix(0.08, 0.5, sp.space); bsnd.gain.value = 0.12 * sp.space;
+  w.pitch.connect(w.tone); w.tone.connect(w.fp);
+  w.fp.connect(dry); dry.connect(au_m.dry); w.fp.connect(snd); snd.connect(au_m.send);
+  w.fb.connect(au_m.dry); w.fb.connect(bsnd); bsnd.connect(au_m.send);
+
+  // the motif keeps its shape but is moved by whole octaves into a clear register
+  let mean = 0;
+  for (const n of sp.motif) mean += au_pitch(sp, n.deg, n.oct);
+  mean /= sp.motif.length;
+  w.shift = mean < 57 || mean > 77 ? 12 * Math.round((67 - mean) / 12) : 0;
+
+  // drone on the root, in a register small speakers can still carry
+  w.dm = au_fold(sp.root, 43);
+  const lp = mix(3, 6.5, sp.bright);
+  w.drone = au_hold(sp.timbre, w.dm, t, w.pitch, {
+    bright: sp.bright, lp, breathe: [rs.range(11, 17), rs.range(19, 29)],
+    extra: [w.pitch, w.tone, w.fp, w.fb, dry, snd, bsnd],
+  });
+  w.groups.push(w.drone.G);
+  au_set(w.drone, AU_LV.drone, t + o.delay, o.rise);
+  // some worlds also keep the fifth, when the mode has one and a line is free
+  w.fifth = null;
+  if (sp.mode.includes(7) && rs.chance(0.6)) {
+    w.fifth = au_hold(sp.timbre, w.dm + 7, t, w.pitch, { bright: sp.bright, lp: lp * 0.8, breathe: [rs.range(13, 21), rs.range(23, 31)] });
+    w.groups.push(w.fifth.G);
+  }
+  au_bed(w, t, o.delay + 0.2);
+  return w;
+}
+// Fade a world out and release everything it owns once it is silent.
+function au_fadeWorld(w, t, dur) {
+  if (!w || w.dead) return;
+  w.dead = true; w.q.length = 0;
+  for (const g of [w.fp.gain, w.fb.gain]) { g.setValueAtTime(1, t); g.linearRampToValueAtTime(0, t + dur); }
+  const T = t + dur + 0.05;
+  for (const G of w.groups) au_end(G, T);
+  for (const v of w.live) au_end(v.G, T);
+}
+function au_dropPortals(t, tau) {
+  if (au_kin) au_kill(au_kin, t, tau);
+  if (au_str) au_kill(au_str, t, tau);
+  au_kin = au_str = null; au_destKey = '';
+  au_pw[0] = au_pw[1] = 0;
+}
+
+// ---------- the score ----------
+// Every statement is the motif or something made from it: its head, a move by a
+// mode step, its retrograde, or the same at double length.
+function au_phrase(w, kind) {
+  const sp = w.spec, r = w.rs, beat = 60 / sp.tempo;
+  let ns = sp.motif.map((n) => ({ deg: n.deg, oct: n.oct, beats: n.beats }));
+  let step = 0, mul = 1, vel = 0.8;
+  if (kind === 'full') vel = w.devN ? 0.86 : 1;
+  else if (kind === 'head') {
+    ns = ns.slice(0, ns.length > 4 && r.chance(0.5) ? 3 : 2);
+    ns[ns.length - 1].beats = Math.max(2, ns[ns.length - 1].beats);
+  } else if (kind === 'step') step = r.pick([1, -1, 1, 2, -2]);
+  else if (kind === 'retro') ns.reverse();
+  else if (kind === 'aug') {
+    mul = 2; vel = 0.74;
+    let total = 0;
+    for (const n of ns) total += n.beats;
+    if (total * 2 * beat > 12) ns = ns.slice(0, 3);
+  }
+  const notes = [];
+  let off = 0;
+  ns.forEach((n, i) => {
+    const dur = Math.max(0.2, n.beats * beat * mul), last = i === ns.length - 1;
+    notes.push({ off, midi: au_pitch(sp, n.deg + step, n.oct) + w.shift, dur, vel: vel * (i === 0 ? 1 : last ? 0.9 : 0.94), kind: 'mel', last });
+    off += dur;
+  });
+  return { notes, total: off };
+}
+function au_variation(w) {
+  w.devN++;
+  if (w.devN % 5 === 0) return 'full';        // now and then the tune comes back whole
+  let k = w.lastVar;
+  while (k === w.lastVar) k = w.rs.weighted([['head', 4], ['step', 2.5], ['retro', 2], ['aug', 1.5]]);
+  w.lastVar = k;
+  return k;
+}
+// Is a line free for a melody that starts at time at?
+function au_room(w, at, kind) {
+  let b = AU_MAXV - 1;
+  if (at < w.oldUntil) b--;
+  if (at < w.pivotUntil) b--;
+  if (at < w.swellGone) b--;
+  if (au_kin && au_pw[0] > AU_EPS) b--;
+  if (au_str && au_pw[1] > AU_EPS) b--;
+  if (kind === 'dev' && w.swellOn) b--;       // the swell gives way only to the motif and the resolution
+  return b > 0;
+}
+// The drone leaves the root for another degree of the mode, and later returns.
+// Both happen just before a statement, so the harmony turns with the phrase.
+function au_harmony(w, at, now) {
+  if (w.swellOn || now < w.drone.busy) return;
+  if (!w.home) {
+    au_retune(w.drone, w.dm, now);
+    w.home = true;
+  } else if (at >= w.moveAt) {
+    const m = w.spec.mode;
+    const cands = m.slice(1).map((d) => [d, d === 7 || d === 5 ? 3 : d === 8 || d === 9 ? 2 : d === 3 || d === 4 ? 1.5 : 0.4]);
+    let d = w.rs.weighted(cands);
+    if (d > 6 && w.dm + d - 12 >= 41) d -= 12;
+    au_retune(w.drone, w.dm + d, now);
+    w.home = false;
+    w.moveAt = at + w.rs.range(20, 40);
+  }
+}
+function au_plan(w, now) {
+  const st = w.st, portals = (au_kin && au_pw[0] > AU_EPS) || (au_str && au_pw[1] > AU_EPS);
+  // an approach to the portals belongs to their two tones: cut a fragment short
+  if (portals && w.mel.kind === 'dev' && w.q.length) {
+    w.q.length = 0;
+    w.mel.until = Math.min(w.mel.until, now + 1.2);
+  }
+  // and bring the drone home, so the kin tone sits on its root
+  if (portals && !w.home && !w.swellOn && now >= w.drone.busy) { au_retune(w.drone, w.dm, now); w.home = true; }
+  if (now < st.at - AU_LEAD) return;
+  if (now < w.mel.until) { st.at = w.mel.until + 3; return; }
+  const dev = st.kind === 'dev', at = Math.max(st.at, now + 0.5);
+  if (!au_room(w, at, st.kind) || (dev && (portals || (w.swellOn && now - w.swellT < 8)))) {
+    st.at = now + AU_LEAD + (dev ? 2.5 : 0.3);
+    return;
+  }
+  if (dev) au_harmony(w, at, now);
+  const ph = au_phrase(w, dev ? au_variation(w) : 'full');
+  for (const n of ph.notes) { n.t = at + n.off; w.q.push(n); }
+  const end = at + ph.total;
+  w.mel = { from: at, until: end + 0.9, kind: st.kind };
+  if (!dev) au_stat.first = { from: at, until: end };
+  // after the statement a long rest; after that, fragments well apart
+  w.st = { kind: 'dev', at: dev ? Math.max(at + 9, end + 5) + w.rs.range(0, 8) : end + w.rs.range(6, 9) };
+}
+// Share out the three lines. The drone always has one. What is already sounding
+// keeps its line; then the portal tones, the swell, the pulse, and last the
+// drone's fifth, which gives way to anything.
+function au_alloc(w, now) {
+  let b = AU_MAXV - 1, used = 1;
+  if (now < w.oldUntil) { b--; used++; }
+  if (now < w.pivotUntil) { b--; used++; }
+  if (now < w.swellGone) { b--; used++; }
+  if (now >= w.mel.from - AU_LEAD && now < w.mel.until) { b--; if (now >= w.mel.from) used++; }
+  for (let i = 0; i < 2; i++) {               // the nearer portal first
+    const kin = (i === 0) === (au_pw[0] >= au_pw[1]), h = kin ? au_kin : au_str;
+    if (!h) continue;
+    const want = au_pw[kin ? 0 : 1], ok = want > AU_EPS && b > 0;
+    if (ok) { b--; used++; }
+    au_set(h, ok ? want * AU_LV.portal * (kin ? 1 : 1.15) : 0, now, ok ? 0.12 : 0.1);
+  }
+  if (w.swell) {
+    const ok = w.swellOn && b > 0;
+    if (ok) { b--; used++; }
+    au_set(w.swell, ok ? AU_LV.swell : 0, now, ok ? 2 : 0.25);
+  }
+  const fifthHeard = w.fifthOn || now - w.fifthOff < 0.5;
+  w.pulseOK = b > 1 || (b === 1 && !fifthHeard);
+  if (now - w.pulseSeen < 1.2) b--;
+  if (now - w.pulseAt < 0.2) used++;
+  if (w.fifth) {
+    const ok = b > 0 && w.home && now >= w.drone.busy;
+    if (ok) used++;
+    else if (w.fifthOn) w.fifthOff = now;
+    w.fifthOn = ok;
+    au_set(w.fifth, ok ? AU_LV.fifth : 0, now, ok ? 2.5 : 0.16);
+  }
+  au_stat.voices = used;
+  if (used > au_stat.maxVoices) au_stat.maxVoices = used;
+}
+// Commit the queued notes that fall inside the horizon. The melody is one line:
+// each note lets go of the one before it.
+function au_flush(w, now, until) {
+  while (w.q.length && w.q[0].t < until) {
+    const n = w.q.shift();
+    let t = n.t;
+    if (t < now + 0.01) {                      // late (a stalled tab): keep the rhythm, move the rest
+      const d = now + 0.02 - t;
+      t += d;
+      for (const x of w.q) x.t += d;
+      w.mel.until += d;
+    }
+    if (w.voice) w.voice.damp(t, AU_TM[w.spec.timbre].perc ? 0.12 : 0.07);
+    w.voice = au_note(w, n, t);
+    au_stat.notes++;
+  }
+}
+// The one noise gesture: a breath at the instant of crossing.
+function au_breath(t) {
+  const c = au_ctx, G = au_group();
+  const src = c.createBufferSource(), bp = c.createBiquadFilter(), g = c.createGain(), snd = c.createGain();
+  src.buffer = au_m.noise; src.loop = true;
+  bp.type = 'bandpass'; bp.Q.value = 0.7;
+  bp.frequency.setValueAtTime(1500, t); bp.frequency.exponentialRampToValueAtTime(420, t + 2.4);
+  g.gain.value = 0; g.gain.setValueAtTime(0, t);
+  g.gain.linearRampToValueAtTime(AU_LV.breath, t + 0.07);
+  g.gain.setTargetAtTime(0, t + 0.07, 0.65);
+  snd.gain.value = 0.5;
+  src.connect(bp); bp.connect(g); g.connect(au_m.dry); g.connect(snd); snd.connect(au_m.send);
+  G.srcs.push(src); G.nodes.push(src, bp, g, snd);
+  src.start(t, 1.3);
+  au_arm(G);
+  au_end(G, t + 0.07 + 8 * 0.65);
+}
+
+// ---------- public interface ----------
+const AUDIO = {
+  ready: false,
+
+  // ctx optional. Without one, a realtime context is created, so the caller must
+  // be inside a user gesture. Safe to call again. Returns true when sound works.
+  init(ctx) {
+    if (AUDIO.ready && (!ctx || ctx === au_ctx)) {
+      if (au_rt && au_on && au_ctx.state === 'suspended') { try { au_ctx.resume(); } catch (e) { /* needs a gesture */ } }
+      return true;
+    }
+    if (AUDIO.ready) AUDIO.reset();
+    try {
+      let c = ctx;
+      au_own = !c;
+      if (!c) {
+        const AC = typeof window !== 'undefined' ? (window.AudioContext || window.webkitAudioContext) : null;
+        if (!AC) return false;
+        c = new AC();
+      }
+      au_ctx = c;
+      au_rt = typeof c.startRendering !== 'function' && typeof c.resume === 'function';
+      au_m = au_build(c);
+      AUDIO.ready = true;
+      if (au_rt) {
+        if (c.state === 'suspended' && au_on) { try { c.resume(); } catch (e) { /* needs a gesture */ } }
+        au_timer = setInterval(() => AUDIO.tick(), 100);   // keeps time when frames stop coming
+      }
+      return true;
+    } catch (e) {
+      au_ctx = null; au_m = null; AUDIO.ready = false;
+      return false;
+    }
+  },
+
+  // Drop everything, so init can be given a fresh context. Not part of the
+  // running piece; used by tests and after a context is lost.
+  reset() {
+    if (au_timer) clearInterval(au_timer);
+    if (au_suspT) clearTimeout(au_suspT);
+    au_timer = 0; au_suspT = 0;
+    if (au_ctx && au_world) {
+      const now = au_ctx.currentTime;
+      au_dropPortals(now, 0.01);
+      for (const G of au_world.groups) au_end(G, now);
+      for (const v of au_world.live) au_end(v.G, now);
+    }
+    if (au_m) {
+      for (const k of Object.keys(au_m)) { try { if (au_m[k] && au_m[k].disconnect) au_m[k].disconnect(); } catch (e) { /* gone */ } }
+    }
+    if (au_own && au_ctx && typeof au_ctx.close === 'function') { try { au_ctx.close(); } catch (e) { /* closed */ } }
+    au_ctx = null; au_m = null; au_world = null; au_kin = au_str = null; au_destKey = '';
+    au_pw[0] = au_pw[1] = 0;
+    au_own = false; au_rt = false; au_on = true; au_paused = false;
+    au_lastTick = -1; au_horizon = AU_LOOK; au_lastPulse = -9; au_pulseAlt = 0; au_lvl = 0;
+    au_stat.live = 0; au_stat.voices = 0; au_stat.maxVoices = 0; au_stat.notes = 0; au_stat.pulses = 0; au_stat.first = null;
+    AUDIO.ready = false;
+  },
+
+  setEnabled(on) {
+    au_on = !!on;
+    if (!AUDIO.ready) return;
+    if (au_suspT) { clearTimeout(au_suspT); au_suspT = 0; }
+    if (au_on && au_rt && au_ctx.state === 'suspended') { try { au_ctx.resume(); } catch (e) { /* needs a gesture */ } }
+    au_m.out.gain.setTargetAtTime(au_on ? 1 : 0, au_ctx.currentTime, 0.15);   // settles in about 0.6 s
+    if (!au_on && au_rt) {
+      au_suspT = setTimeout(() => {
+        au_suspT = 0;
+        if (!au_on && au_ctx && au_rt && au_ctx.state === 'running') { try { au_ctx.suspend(); } catch (e) { /* fine */ } }
+      }, 1200);
+    }
+  },
+
+  // Start a world from silence. Any previous world fades over 1.5 s.
+  enter(spec) {
+    if (!AUDIO.ready || !spec) return;
+    const now = au_ctx.currentTime, old = au_world;
+    au_dropPortals(now, 0.1);
+    if (old) au_fadeWorld(old, now, 1.5);
+    au_world = au_makeWorld(spec, now, { delay: 0.1, rise: 1.2, first: 1.5, oldUntil: old ? now + 1.5 : 0 });
+  },
+
+  // The viewer has passed through a portal. One note that both worlds own is
+  // held while the old drone leaves and the new one arrives, under a single
+  // breath of noise. Then the new world begins; a motif that is returning (an
+  // heirloom) is stated a second sooner.
+  cross(spec) {
+    if (!AUDIO.ready || !spec) return;
+    const old = au_world;
+    if (!old) { AUDIO.enter(spec); return; }
+    const c = au_ctx, now = c.currentTime, sp = au_clean(spec);
+    au_dropPortals(now, 0.07);
+    au_fadeWorld(old, now, 2.6);
+    const pm = au_fold(au_pivotPc(old.spec, sp), 58);
+    const dry = c.createGain(), snd = c.createGain();
+    dry.gain.value = 0.8; snd.gain.value = 0.45;
+    dry.connect(au_m.dry); snd.connect(au_m.send);
+    const pv = au_hold(sp.timbre, pm, now, [dry, snd], { bright: sp.bright, lp: 5, extra: [dry, snd] });
+    pv.g.gain.setValueAtTime(0, now + 0.25);
+    pv.g.gain.linearRampToValueAtTime(AU_LV.pivot, now + 0.7);
+    pv.g.gain.setTargetAtTime(0, now + 2.5, 0.35);
+    au_end(pv.G, now + 2.5 + 8 * 0.35);
+    au_breath(now);
+    au_world = au_makeWorld(spec, now, {
+      delay: 0.5, rise: 0.9, first: 2.5 + (sp.heirloom ? 0.5 : 1.5),
+      oldUntil: now + 2.6, pivotUntil: now + 2.5 + 1.2,
+    });
+  },
+
+  // The worlds behind the two portals; either may be null. Each gets one held
+  // tone, silent until portals() brings it up. Kin: this world's own root an
+  // octave above the drone (or its fifth, when the kin world is rooted there),
+  // in this world's timbre and room. Stranger: that world's root in that
+  // world's timbre, darker and mostly reverb, so it reads as far away.
+  setDestinations(kinSpec, strangerSpec) {
+    const w = au_world;
+    if (!AUDIO.ready || !w) return;
+    const key = (s) => (s ? [s.seed, s.root, s.timbre].join(':') : '-');
+    const k = key(kinSpec) + '|' + key(strangerSpec) + '|' + w.t0;
+    if (k === au_destKey) return;
+    const c = au_ctx, now = c.currentTime;
+    au_dropPortals(now, 0.1);
+    au_destKey = k;
+    let km = -1;
+    if (kinSpec) {
+      const ks = au_clean(kinSpec);
+      const fifth = w.spec.mode.includes(7) && (ks.root - w.spec.root - 7) % 12 === 0;
+      km = au_fold(w.spec.root, 57) + (fifth ? 7 : 0);
+      au_kin = au_hold(w.spec.timbre, km, now, w.pitch, { bright: w.spec.bright, lp: 6 });
+    }
+    if (strangerSpec) {
+      const ss = au_clean(strangerSpec);
+      let sm = au_fold(ss.root, 60);
+      if (sm === km) sm += 12;
+      const dry = c.createGain(), snd = c.createGain();
+      dry.gain.value = 0.45; snd.gain.value = 0.9;
+      dry.connect(au_m.dry); snd.connect(au_m.send);
+      au_str = au_hold(ss.timbre, sm, now, [dry, snd], { bright: ss.bright, lp: 3, extra: [dry, snd] });
+    }
+  },
+
+  // Every frame while portals exist. near 0..1, look 0..1. All zeros otherwise.
+  portals(kinNear, strangerNear, kinLook, strangerLook) {
+    au_pw[0] = au_want(kinNear, kinLook);
+    au_pw[1] = au_want(strangerNear, strangerLook);
+  },
+
+  // Something seen has just gone by: one muted pluck, root and fifth in turn.
+  pulse(strength) {
+    const w = au_world;
+    if (!AUDIO.ready || !w || au_paused || !au_on) return;
+    const s = sat(+strength || 0), now = au_ctx.currentTime;
+    if (s < 0.02 || now - au_lastPulse < 1 / 6) return;
+    w.pulseSeen = now;                         // asks the drone's fifth to make room
+    if (!w.pulseOK) return;
+    au_lastPulse = now; w.pulseAt = now;
+    const m = w.spec.mode;
+    let fifth = m[0];
+    for (const d of m) if (Math.abs(d - 7) < Math.abs(fifth - 7)) fifth = d;
+    const midi = au_fold(w.spec.root, 57) + (au_pulseAlt++ % 2 ? fifth : 0);
+    au_note(w, { midi, dur: 0.1, vel: 0.3 + 0.7 * s, kind: 'pluck', last: true }, now + 0.01);
+    au_stat.pulses++;
+  },
+
+  // The world's one event. start: the drone opens and a second held voice rises
+  // a mode step above the root over about six seconds. peak: that voice lets
+  // go and one low, soft, long note on the root answers it.
+  event(phase) {
+    const w = au_world;
+    if (!AUDIO.ready || !w) return;
+    const now = au_ctx.currentTime, sp = w.spec, d = w.drone;
+    const open = (k, tau) => {
+      d.open = k;
+      d.filt.frequency.setTargetAtTime(Math.min(au_mtof(d.midi) * d.lp * k, 15000), now, tau);
+      au_set(d, AU_LV.drone * (k > 1 ? 1.25 : 1), now, tau);
+    };
+    if (phase === 'start') {
+      if (w.swellOn) return;
+      w.swellOn = true; w.swellT = now;
+      if (!w.swell) {
+        w.swell = au_hold(sp.timbre, w.dm + 12 + sp.mode[1], now, w.pitch, { bright: sp.bright, lp: 5, breathe: [9, 14] });
+        w.groups.push(w.swell.G);
+      }
+      open(2.6, 2);
+    } else if (phase === 'peak') {
+      w.swellOn = false;
+      if (w.swell) {
+        au_kill(w.swell, now + 0.1, 0.8);
+        w.groups.splice(w.groups.indexOf(w.swell.G), 1);
+        w.swell = null; w.swellGone = now + 0.1 + 0.8 * 3.5;
+      }
+      open(1, 3);
+      const at = now + 0.7;
+      if (au_paused || (w.mel.kind === 'first' && now < w.mel.until) || !au_room(w, at, 'peak')) return;
+      w.q.length = 0;                          // a fragment under way yields to the resolution
+      w.q.push({ t: at, midi: au_fold(sp.root, 41), dur: 5.5, vel: 0.9, kind: 'peak', last: true });
+      w.mel = { from: at, until: at + 6.5, kind: 'peak' };
+      w.st.at = Math.max(w.st.at, w.mel.until + 4);
+    }
+  },
+
+  // Duck to a quarter and hold the score where it is.
+  setPaused(on) {
+    on = !!on;
+    if (on === au_paused) return;
+    au_paused = on;
+    if (!AUDIO.ready) return;
+    const now = au_ctx.currentTime, w = au_world;
+    au_m.duck.gain.setTargetAtTime(on ? 0.25 : 1, now, 0.12);
+    if (on) au_pauseT = now;
+    else if (w) {
+      const d = now - au_pauseT;
+      w.st.at += d; w.moveAt += d; w.swellT += d;
+      if (w.q.length) { w.mel.until += d; for (const n of w.q) n.t += d; }
+    }
+  },
+
+  // Run the scheduler. Call every frame; extra calls cost nothing.
+  tick() {
+    if (!AUDIO.ready) return;
+    const now = au_ctx.currentTime, w = au_world;
+    // if ticks arrive slowly (a throttled background tab) look further ahead
+    const gap = au_lastTick < 0 ? 0 : now - au_lastTick;
+    au_lastTick = now;
+    au_horizon = clamp(Math.max(AU_LOOK, gap * 2.2, au_horizon * 0.98), AU_LOOK, 3);
+    if (!w || au_paused) return;
+    au_plan(w, now);
+    au_alloc(w, now);
+    au_flush(w, now, now + au_horizon);
+  },
+
+  // 0..1 smoothed output level for a small meter.
+  level() {
+    if (!AUDIO.ready || !au_m.an || !au_lvlBuf) return 0;
+    try { au_m.an.getFloatTimeDomainData(au_lvlBuf); } catch (e) { return 0; }
+    let s = 0;
+    for (let i = 0; i < au_lvlBuf.length; i++) s += au_lvlBuf[i] * au_lvlBuf[i];
+    const v = sat(Math.sqrt(Math.sqrt(s / au_lvlBuf.length) / 0.2));
+    if (!Number.isFinite(v)) return au_lvl;
+    au_lvl += (v - au_lvl) * (v > au_lvl ? 0.5 : 0.1);
+    return au_lvl;
+  },
+
+  // For tests and demos only: counters, and when the first statement fell.
+  stats() {
+    return { live: au_stat.live, voices: au_stat.voices, maxVoices: au_stat.maxVoices, notes: au_stat.notes, pulses: au_stat.pulses, first: au_stat.first };
+  },
+
+  // For tests and demos only: a valid, musically sensible spec from a seed.
+  demoSpec(seed) {
+    seed = (+seed || 0) >>> 0;
+    const r = stream(seed, 'au-demo');
+    const mode = r.pick([
+      [0, 2, 4, 7, 9], [0, 3, 5, 7, 10], [0, 2, 3, 7, 8], [0, 1, 5, 7, 10], [0, 2, 5, 7, 9],
+      [0, 2, 3, 5, 7, 9], [0, 2, 4, 5, 7, 9], [0, 1, 3, 5, 7, 8],
+      [0, 2, 3, 5, 7, 9, 10], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 6, 7, 9, 11], [0, 2, 4, 5, 7, 9, 10],
+    ]);
+    const root = r.int(36, 57), tempo = r.int(40, 80), beat = 60 / tempo;
+    // a small arch: start on a stable degree, move mostly by step, come to rest
+    let count = r.int(4, 7), deg = r.pick([0, 0, 2, 4]);
+    const motif = [];
+    for (let i = 0; i < count; i++) {
+      motif.push({ deg, oct: root >= 46 ? 1 : 2, beats: r.weighted([[1, 5], [2, 1.5], [0.5, 1]]) });
+      deg = clamp(deg + r.weighted([[1, 3], [-1, 3], [2, 2], [-2, 1.5], [3, 0.5]]), -2, mode.length + 2);
+    }
+    const last = motif[motif.length - 1];
+    last.deg = r.pick([0, 0, 2, mode.length]); last.beats = 2;
+    // keep the tune short enough to be remembered: between about 3.5 and 7 seconds
+    const secs = () => motif.reduce((s, n) => s + n.beats, 0) * beat;
+    for (let i = 0; i < motif.length - 1 && secs() > 7; i++) if (motif[i].beats > 1) motif[i].beats = 1;
+    while (secs() > 7 && motif.length > 4) motif.splice(motif.length - 2, 1);
+    for (let i = 0; i < motif.length - 1 && secs() > 7; i++) motif[i].beats = 0.5;
+    for (let i = 0; i < motif.length - 1 && secs() < 3.5; i++) motif[i].beats = Math.max(1, motif[i].beats * 2);
+    return {
+      seed, root, mode, tempo, motif,
+      timbre: r.pick(Object.keys(AU_TM)),
+      bed: r.pick(AU_BEDS),
+      bedLevel: r.range(0.3, 0.8),
+      bright: r.range(0.25, 0.85),
+      space: r.range(0.3, 0.85),
+      heirloom: false,
+    };
   },
 };
 

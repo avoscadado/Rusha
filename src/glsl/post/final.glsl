@@ -2,7 +2,7 @@
 precision highp float; precision highp int; precision highp sampler2D;
 uniform sampler2D uSrc, uGlow, uNoise;
 uniform vec2 uOut;            // canvas size in pixels
-uniform vec4 uK;              // glow strength, tooth strength, fade 0..1, unused
+uniform vec4 uK;              // glow strength, tooth strength, fade 0..1, debug
 uniform vec3 uFadeInk;        // what the plate fades from
 out vec4 O;
 void main() {
@@ -18,6 +18,7 @@ void main() {
   c *= 1.0 + tooth * uK.y;
   c += tooth * uK.y * 0.012;
   c = mix(uFadeInk, c, uK.z);
+  if (uK.w > 0.5) { O = vec4(clamp(texture(uSrc, uv).rgb, 0.0, 1.0), 1.0); O.rgb *= O.rgb; return; }   // debug views stay linear
   c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
   O = vec4(c + (grain) / 255.0, 1.0);
 }

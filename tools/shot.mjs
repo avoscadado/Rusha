@@ -1,5 +1,5 @@
 // Renders stills of the built page in headless Chromium (software WebGL).
-//   node tools/shot.mjs out.png "seed=ABC&form=plain" [--t 12] [--w 640 --h 360] [--look 0.3,0] [--sheet a,b,c] [--cols 3]
+//   node tools/shot.mjs out.png "seed=ABC&form=plain" [--t 12] [--w 640 --h 360] [--look 0.3,0] [--sheet a,b,c] [--cols 3] [--page other.html] [--cost]
 // With --sheet, the query is a template: each comma-separated item replaces {} in it
 // and the stills are laid out in a grid. Prints one JSON line of info per still.
 import { createRequire } from 'module';
@@ -14,6 +14,7 @@ const W = +opt('w', 640), H = +opt('h', 360), T = opt('t', '6').split(',').map(N
 const items = opt('sheet', null) ? opt('sheet', '').split(',') : [null];
 const look = opt('look', null);
 const cost = args.includes('--cost');
+const pageFile = path.resolve(opt('page', path.join(root, 'index.html')));
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const shots = [];
@@ -24,7 +25,7 @@ for (const item of items) {
   const log = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { const t = m.text(); if (!/GPU stall|GL Driver Message/.test(t)) log.push(t.slice(0, 1500)); } });
   page.on('pageerror', (e) => log.push('PAGEERROR ' + String(e).slice(0, 600)));
-  await page.goto(pathToFileURL(path.join(root, 'index.html')).href + `?shot=1&w=${W}&h=${H}&${q}${cost ? '&debug=1' : ''}`);
+  await page.goto(pathToFileURL(pageFile).href + `?shot=1&w=${W}&h=${H}&${q}${cost ? '&debug=1' : ''}`);
   const ok = await page.evaluate(() => window.__ks && window.__ks.wait ? window.__ks.wait() : false).catch((e) => { log.push(String(e)); return false; });
   if (!ok) { failed = true; console.log(JSON.stringify({ item: q, ok: false, log })); await page.close(); continue; }
   let t0 = 0;

@@ -4,7 +4,7 @@
 //   uTr[0] object: 0 none, 1 pylon, 2 stone, 3 lamp, 4 gate, 5 dome
 //   uTr[1] spacing    uTr[2] height     uTr[3] jitter 0..1   uTr[4] how many cells are filled 0..1
 //   uTr[5], uTr[6] the exception's cell (x, z)   uTr[7] exception: 1 lit, 2 absent, 3 colossal, 4 fallen
-//   uTr[8] dune height   uTr[9] ground: 0 bare, 1 salt polygons, 2 furrows   uTr[10] width of object
+//   uTr[8] dune height   uTr[9] ground: 0 bare, 1 salt polygons   uTr[10] width of object
 // ---------------------------------------------------------------------------
 #define FAR 1500.0
 #define STEPK 0.92
@@ -42,6 +42,8 @@ float thing(vec3 q, float kind, float H, float W, vec4 r, bool odd) {
   return d;
 }
 
+float shafts(vec3 ro, vec3 rd, float t, float jit) { return 0.0; }
+
 float map(vec3 p) {
   float d = p.y - groundH(p.xz);
   d = min(d, setPiece(p));
@@ -49,6 +51,10 @@ float map(vec3 p) {
   float kind = uTr[0];
   if (kind < 0.5) return d;
   float S = uTr[1], H = uTr[2], W = uTr[10];
+  // far things sink into the ground before they get thinner than a pixel
+  float lod = 1.0 - smoothstep(9.0 * S, 13.0 * S, length(p.xz - uCamP.xz));
+  if (lod < 0.01) return d;
+  H *= lod;
   float top = H * 2.5 + 2.0;
   if (p.y > top) { d = min(d, p.y - top + 1.0); gD = d; return d; }
   ivec2 c = ivec2(floor(p.xz / S));
@@ -94,9 +100,6 @@ Surf surf(vec3 p, vec3 n, float t) {
     float line = 1.0 - smoothstep(0.02, 0.05 + 2.0 * uPix * t, d2 - d1);
     s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.55), line * fade);
     s.shade = mix(s.shade, uInk[DEEP], line * fade * 0.4);
-  } else if (uTr[9] > 1.5) {                                    // furrows
-    float line = smoothstep(0.42, 0.5, abs(fract(p.x * 0.5) - 0.5));
-    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.4), line * fade);
   }
   return s;
 }

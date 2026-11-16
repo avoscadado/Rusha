@@ -2,9 +2,64 @@
 // A world is a pure function of its key { base, change, heir, age }.
 //   base    the place itself: its form, layout, set piece, event
 //   change  0 for the place as first found; otherwise how this kin differs
-//   heir    something handed down a line of worlds (a moon, a tune)
-// Every trait draws from its own named stream, so new traits never disturb old ones.
+//   heir    what is handed down a line of worlds: a moon and a tune
+//   age     how many plates the heirloom has lasted
+// Every trait draws from its own named stream, so adding a trait later never
+// disturbs the traits a seed already has.
 const FORMS = {};
+
+const numWord = (n) => {
+  n = Math.round(n);
+  const ones = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  if (n < 20) return ones[n];
+  if (n < 100) return tens[(n / 10) | 0] + (n % 10 ? '-' + ones[n % 10] : '');
+  if (n < 1000) return ones[(n / 100) | 0] + ' hundred' + (n % 100 ? ' and ' + numWord(n % 100) : '');
+  return String(n);
+};
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// The set pieces: one colossal thing a world may hold. `tall` and `wide` are in
+// units of the set piece's scale, so sentences can state true sizes.
+const SETS = {
+  1: { noun: 'door', tall: 4, eye: 2.0, line: (m) => `A door ${numWord(m / 3)} storeys high stands here by itself.`, rise: 'It opens as you come.' },
+  2: { noun: 'ball', tall: 2, eye: 1.4, line: (m) => `A ball ${numWord(m)} metres across rests on the ground.`, rise: 'Then it does not rest.' },
+  3: { noun: 'ring', tall: 3.1, eye: 1.55, line: (m) => `A ring ${numWord(m)} metres across stands on its edge, and the way goes through it.`, rise: 'It takes the light as you pass.' },
+  4: { noun: 'tower', tall: 6.3, eye: 5.0, line: (m) => `A tower ${numWord(m)} metres high has one room at the top.`, rise: 'The light in the room is on.' },
+  5: { noun: 'stair', tall: 4.3, eye: 3.2, line: (m) => `A stair climbs ${numWord(m)} metres and stops.`, rise: 'Nothing is at the top.' },
+  6: { noun: 'arch', tall: 3.2, eye: 1.8, line: (m) => `An arch ${numWord(m)} metres high has no wall on either side of it.`, rise: 'The way goes under.' },
+  7: { noun: 'slab', tall: 3.0, eye: 1.8, line: (m) => `A slab ${numWord(m)} metres tall hangs a little off the ground.`, rise: 'It goes up as you watch.' },
+  8: { noun: 'tree', tall: 3.1, eye: 2.2, line: () => 'There is one tree.', rise: 'It is in flower.' },
+};
+
+const CHANGES = {
+  night:   { label: 'at night',       line: 'The same place after dark.' },
+  dusk:    { label: 'at dusk',        line: 'The same place with the sun going.' },
+  dawn:    { label: 'at first light', line: 'The same place before anyone is up.' },
+  noon:    { label: 'at noon',        line: 'The same place with the sun overhead and nowhere to hide.' },
+  flooded: { label: 'flooded',        line: 'The same place. The water came and has not left.' },
+  drained: { label: 'drained',        line: 'The same place with the water gone.' },
+  mist:    { label: 'in mist',        line: 'The same place. The mist has taken everything below the knee.' },
+  snow:    { label: 'under snow',     line: 'The same place. It has been snowing for some time.' },
+  emptied: { label: 'emptied',        line: 'The same place with everything taken away but the ground.' },
+  later:   { label: 'much later',     line: 'The same place a long time afterwards.' },
+};
+
+const MOONS = [
+  { id: 'none',     w: 3 },
+  { id: 'ringed',   w: 2, label: 'ringed moon' },
+  { id: 'red',      w: 2, label: 'red moon' },
+  { id: 'crescent', w: 2, label: 'thin moon' },
+  { id: 'pale',     w: 2, label: 'full moon' },
+  { id: 'twin',     w: 1.5, label: 'pair of moons' },
+];
+
+const MODES = {
+  0: [[0, 2, 3, 7, 8], [0, 3, 5, 7, 10], [0, 1, 5, 7, 8]],
+  1: [[0, 2, 3, 7, 9], [0, 2, 5, 7, 9], [0, 2, 3, 5, 7, 10]],
+  2: [[0, 2, 4, 7, 9], [0, 2, 4, 6, 7, 9, 11], [0, 4, 5, 7, 11]],
+};
+
 const WORLD = {
   formNames() { return Object.keys(FORMS); },
 
@@ -27,32 +82,42 @@ const WORLD = {
       ev: { id: 0, type: 'none', t0: 22, dur: 16 },
       sky: [0.3, 1, 0, 0],
       body: new Float32Array(8), bodyK: new Float32Array(8),
-      part: [0, 0, 0, 1],
-      door: { r: 7, kin: [0, 0], stranger: [0, 0] }, doorsAt: 44,
-      facts: {},
+      part: [0, 0, 0, 1], cover: 0, fill: [0, 1, 0, 0],
+      door: { r: 7, kin: [0, 0], stranger: [9, 7] }, doorsAt: 46,
+      pulse: 0, mistTop: 3, floodTo: 1.2, interior: false,
+      timbres: ['glass', 'bell'], space: 0.6,
+      facts: {}, changeType: null,
     };
     // 1. the place
-    const formPick = S('form');
     const names = Object.keys(FORMS);
-    g.form = key.form && FORMS[key.form] ? key.form : formPick.weighted(names.map((n) => [n, FORMS[n].weight || 1]));
+    g.form = key.form && FORMS[key.form] ? key.form : S('form').weighted(names.map((n) => [n, FORMS[n].weight ?? 1]));
     const F = FORMS[g.form];
     // 2. its inks and its hour
-    const pr = S('ink');
     const pool = PALETTES.filter((p) => !F.hours || F.hours.includes(p.hour));
-    g.pal = key.pal && PALETTE_BY_NAME[key.pal] ? PALETTE_BY_NAME[key.pal] : pr.pick(pool);
+    g.pal = key.pal && PALETTE_BY_NAME[key.pal] ? PALETTE_BY_NAME[key.pal] : S('ink').pick(pool);
     WORLD.light(g, S('light'));
     // 3. the form lays out its ground, set piece and event
     F.build(g, S);
-    // 4. kin: the same place, changed
-    if (key.change) WORLD.change(g, key.change >>> 0);
-    g.inks = g.pal;
+    if (g.set.type) g.set.eye = SETS[g.set.type].eye;
+    // 4. what has been handed down
+    WORLD.heirloom(g, key);
+    // 5. kin: the same place, changed
+    if (key.change) WORLD.change(g, key.change >>> 0, F);
+    // 6. everything derived
     g.inkFlat = new Float32Array(24);
     INK_KEYS.forEach((k, i) => g.inkFlat.set(g.pal[k], i * 3));
+    if (g.ev.type === 'sunset') {
+      const to = PALETTE_BY_NAME[g.ev.toPal] || PALETTES[0];
+      g.ev.toFlat = new Float32Array(24);
+      INK_KEYS.forEach((k, i) => g.ev.toFlat.set(to[k], i * 3));
+    }
     g.doorInk = V.mix(g.pal.glow, g.pal.low, 0.35);
+    WORLD.words(g, F);
+    WORLD.audio(g, key);
     return g;
   },
 
-  // Sun or moon, sky furniture, weather: decided from the palette's hour.
+  // Sun or moon, sky furniture, air: decided from the palette's hour.
   light(g, r) {
     const hour = g.pal.hour;
     const side = r.chance(0.5) ? 1 : -1;
@@ -61,60 +126,142 @@ const WORLD = {
     else { g.sunAz = side * r.range(0.25, 0.8); g.sunEl = r.range(0.3, 0.6); g.sun = [0.05, 0.9, 2, 12]; }
     g.sky = [r.chance(0.7) ? r.range(0.2, 0.75) : 0, r.range(0.7, 1.6), hour === 0 ? r.range(0.6, 1) : (hour === 1 ? r.range(0, 0.35) : 0), r.chance(0.55) ? r.range(0.03, 0.09) : 0];
     g.air = [r.range(0.0011, 0.0026), r.int(5, 8), -100, 0];
+    // by night a little light from the open sky keeps upward faces readable
+    g.fill = hour === 0 ? [0, 1, 0, 0.6] : [0, 1, 0, 0];
   },
 
-  change(g, change) {
-    // filled in with the kin transformations
+  moonKind(heir) { return stream(heir >>> 0, 'moon').weighted(MOONS.map((m) => [m, m.w])); },
+  heirloom(g, key) {
+    const r = stream(key.heir >>> 0, 'moon');
+    const m = r.weighted(MOONS.map((x) => [x, x.w]));
+    g.heir = { id: m.id, label: m.label || null, age: key.age || 0 };
+    if (m.id === 'none' || g.interior) return;
+    // opposite the sun, and high enough to clear the horizon furniture
+    const side = g.sunAz > 0 ? -1 : 1;
+    const az = side * r.range(0.22, 0.5), el = r.range(0.2, 0.36), size = r.range(0.045, 0.085);
+    const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    const phase = m.id === 'crescent' ? 0.55 * side : m.id === 'pale' || m.id === 'ringed' ? 0 : r.pick([0, 0.8 * side]);
+    g.body.set([dir[0], dir[1], dir[2], m.id === 'crescent' ? size * 1.2 : size], 0);
+    g.bodyK.set([phase, m.id === 'ringed' ? 1 : 0, m.id === 'red' ? 0.85 : 0, 0], 0);
+    if (m.id === 'twin') {
+      const az2 = az + side * 0.16, el2 = el + 0.09;
+      g.body.set([Math.sin(az2) * Math.cos(el2), Math.sin(el2), Math.cos(az2) * Math.cos(el2), size * 0.45], 4);
+      g.bodyK.set([phase, 0, 0.3, 0], 4);
+    }
+  },
+
+  pickChange(g, change, F) {
     const r = stream(change, 'kind');
-    const others = PALETTES.filter((p) => p !== g.pal);
-    g.pal = r.pick(others);
+    const hour = g.pal.hour;
+    const opts = [];
+    if (hour !== 0 && !g.interior) opts.push(['night', 3]);
+    if (hour !== 1) opts.push([g.pal.temp > 0 ? 'dusk' : 'dawn', 2.5]);
+    if (hour !== 2 && !g.interior) opts.push(['noon', 1.5]);
+    if (g.sea[0] < 0.5 && F.flood !== false) opts.push(['flooded', 3]);
+    if (g.sea[0] > 0.5 && g.sea[0] < 2.5 && F.drain !== false) opts.push(['drained', 2.5]);
+    if (F.mist !== false && g.sea[0] < 2.5) opts.push(['mist', 2]);
+    if (F.snow !== false && !g.interior) opts.push(['snow', 2]);
+    if (F.empty) opts.push(['emptied', 1.5]);
+    if (F.later) opts.push(['later', 2.5]);
+    return { type: r.weighted(opts), r };
+  },
+  change(g, change, F) {
+    const { type, r } = WORLD.pickChange(g, change, F);
+    g.changeType = type;
+    const want = { night: 0, dusk: 1, dawn: 1, noon: 2 }[type];
+    let pool;
+    if (want !== undefined) {
+      pool = PALETTES.filter((p) => p.hour === want && (type === 'dusk' ? p.temp > 0 : type === 'dawn' ? p.temp <= 0.25 : true));
+    } else if (type === 'snow') {
+      pool = ['Milk Glass', 'Pewter', 'First Light', 'Salt Flat', 'Cyanotype', 'Lilac Smoke', 'Prussian'].map((n) => PALETTE_BY_NAME[n]);
+    } else {
+      pool = PALETTES.filter((p) => p !== g.pal && (!F.hours || F.hours.includes(p.hour)));
+    }
+    pool = pool.filter((p) => p !== g.pal);
+    g.pal = r.pick(pool.length ? pool : PALETTES);
+    const keepSky = g.sky[3];
     WORLD.light(g, stream(change, 'light'));
+    g.sky[3] = keepSky;                                    // the far country does not move
+    if (type === 'flooded') { g.sea = [r.chance(0.5) ? 2 : 1, g.floodTo, r.range(0.5, 1), 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
+    else if (type === 'drained') { g.sea = [0, 0, 0, 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
+    else if (type === 'mist') { g.air[2] = g.mistTop; g.air[3] = 0.022; if (g.ev.type === 'mist') g.ev.type = 'none'; }
+    else if (type === 'snow') { g.part = [1, 0.55, 1.6, 1]; g.cover = 0.85; g.sky[0] = Math.max(g.sky[0], 0.5); }
+    else if (type === 'emptied') F.empty(g, r);
+    else if (type === 'later') F.later(g, r);
+    if (type === 'night' && F.night) F.night(g, r);
+    // the heirloom moon moves with the new sun
+    g.body.fill(0); g.bodyK.fill(0);
+    WORLD.heirloom(g, g.key);
+  },
+
+  words(g, F) {
+    const w = F.words(g);
+    let name = w.name, line = w.line;
+    if (g.changeType) {
+      const c = CHANGES[g.changeType];
+      name = `${w.name}, ${c.label}`;
+      line = (F.changeLines && F.changeLines[g.changeType]) || c.line;
+    }
+    if (g.heir.label && g.heir.age >= 2 && !g.interior) {
+      line += ` The ${g.heir.label} has followed for ${numWord(g.heir.age + 1)} plates.`;
+    }
+    g.name = name; g.line = line; g.baseName = w.name;
+  },
+
+  audio(g, key) {
+    const rb = stream(key.base >>> 0, 'sound'), rh = stream(key.heir >>> 0, 'tune');
+    const mode = rb.pick(MODES[g.pal.hour]);
+    const n = rh.int(4, 6), motif = [];
+    let deg = rh.int(0, 2);
+    for (let i = 0; i < n; i++) {
+      motif.push({ deg, oct: 1, beats: i === n - 1 ? 2 : rh.pick([1, 1, 1, 0.5, 2]) });
+      deg += rh.pick([1, 1, 2, -1, -2, 3]); deg = clamp(deg, 0, 7);
+    }
+    g.audio = {
+      seed: (key.base ^ (key.change || 0)) >>> 0,
+      root: 38 + rb.int(0, 14), mode, timbre: rb.pick(g.timbres),
+      tempo: Math.round(mix(44, 66, sat((g.speed - 6) / 16))), motif,
+      bed: g.interior ? 'room' : g.part[0] > 3.5 ? 'rain' : g.sea[0] > 0.5 && g.sea[0] < 2.5 ? 'sea' : g.pal.hour === 0 && rb.chance(0.5) ? 'still' : 'wind',
+      bedLevel: g.interior ? 0.3 : 0.5, bright: [0.25, 0.5, 0.75][g.pal.hour], space: g.space,
+      heirloom: (key.age || 0) > 0,
+    };
   },
 
   // What the world looks like at this moment of the visit. ta is seconds since
   // arrival (drives the event); t is the world's own running clock.
   live(g, ta, t) {
-    const e = g.ev.type === 'none' ? 0 : smooth(0, 1, (ta - g.ev.t0) / g.ev.dur);
+    const ty = g.ev.type;
+    const e = ty === 'none' ? 0 : smooth(0, 1, (ta - g.ev.t0) / g.ev.dur);
     const L = {
-      ev: e, inks: g.inkFlat, tr: g.tr,
-      sun: g.sun, air: g.air.slice(), sea: g.sea.slice(), sky: g.sky, body: g.body, bodyK: g.bodyK, part: g.part,
+      ev: e, inks: g.inkFlat, tr: g.tr, cover: g.cover,
+      sun: g.sun, air: g.air, sea: g.sea, sky: g.sky, body: g.body, bodyK: g.bodyK, part: g.part,
       set: g.set.pos, setMotion: g.set.move, setLit: g.set.lit,
     };
-    let el = g.sunEl, az = g.sunAz;
-    const ty = g.ev.type;
+    let el = g.sunEl;
+    const az = g.sunAz;
     if (ty === 'rise') { L.setMotion = e; L.setLit = e; }
     else if (ty === 'lights') { L.setLit = e; }
-    else if (ty === 'tide') { L.sea[1] = g.sea[1] + g.ev.amount * e; }
-    else if (ty === 'mist') { L.air[2] = mix(g.air[2], g.ev.amount, e); L.air[3] = mix(g.air[3], 0.03, e); }
-    else if (ty === 'sunset') { el = mix(g.sunEl, -0.04, e); }
+    else if (ty === 'tide') { L.sea = g.sea.slice(); L.sea[1] = g.sea[1] + g.ev.amount * e; }
+    else if (ty === 'mist') { L.air = g.air.slice(); L.air[2] = mix(g.air[2] > -50 ? g.air[2] : g.mistTop - 14, g.mistTop, e); L.air[3] = mix(g.air[3], 0.024, e); }
+    else if (ty === 'sunset') {
+      el = mix(g.sunEl, -0.03, e);
+      const a = g.inkFlat, b = g.ev.toFlat, o = L.inks = new Float32Array(24);
+      for (let i = 0; i < 24; i++) o[i] = mix(a[i], b[i], e);
+      L.sky = g.sky.slice(); L.sky[2] = mix(g.sky[2], 0.8, smooth(0.5, 1, e));
+    } else if (ty === 'snow') { L.part = [1, 0.6 * e, 1.5, 1]; L.cover = Math.max(g.cover, 0.8 * smooth(0.25, 1, e)); }
     L.sunDir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     return L;
   },
-};
 
-// ---- PLAIN ----
-FORMS.plain = {
-  weight: 1,
-  build(g, S) {
-    const r = S('plain');
-    const kind = r.weighted([[1, 3], [2, 3], [3, 3], [4, 2], [5, 1.5]]);
-    const spacing = r.range(26, 46);
-    const H = { 1: r.range(9, 20), 2: r.range(3.5, 7), 3: r.range(6, 9), 4: r.range(7, 12), 5: r.range(3, 6) }[kind];
-    const W = { 1: r.range(0.9, 1.6), 2: r.range(1.1, 1.9), 3: 1.0, 4: r.range(0.8, 1.1), 5: 1 }[kind];
-    const odd = r.int(1, 4);
-    const oz = Math.round((g.speed * r.range(16, 22)) / spacing), ox = r.chance(0.5) ? 0 : -1;
-    g.tr.set([kind, spacing, H, kind === 2 ? 0.8 : r.range(0, 0.25), kind === 5 ? 0.45 : r.range(0.75, 1), ox, oz, odd, r.chance(0.3) ? r.range(2, 6) : 0, r.int(0, 2), W]);
-    g.path.y0 = r.range(3.2, 6.5);
-    g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.01;
-    if (r.chance(0.6)) g.sea = [2, 0.03, r.range(0.35, 1), 0];
-    g.door = { r: 5.5, kin: [0, 0.5], stranger: [spacing * 0.0 + 9, 7] };
-    if (r.chance(0.55)) {
-      const type = r.pick([1, 2, 3, 4, 5, 6, 7, 8]);
-      const scale = r.range(9, 22);
-      const onLine = type === 3 || type === 6 || type === 1;
-      g.set = { type, pos: [onLine ? 0 : (r.chance(0.5) ? 1 : -1) * r.range(1.2, 2.2) * scale, type === 3 ? -scale * 0.2 : 0, g.speed * r.range(24, 30)], scale, yaw: 0, attend: onLine ? 0.2 : 0.75, eye: 2.6, move: 0, lit: 0 };
-      if (onLine) g.path.y0 = Math.max(g.path.y0, type === 3 ? scale * 1.3 : scale * 1.2) * (type === 1 ? 0.9 : 1), g.set.pos[1] = type === 3 ? g.path.y0 - 1.55 * scale : 0;
-      g.ev = { id: 1, type: 'rise', t0: 10, dur: 14 };
-    } else if (kind === 3) g.ev = { id: 2, type: 'lights', t0: 8, dur: 26 };
+  // share codes: version, then the four parts of the key in base 36
+  code(key) { return ['1', key.base >>> 0, key.change >>> 0, key.heir >>> 0, key.age | 0].map((v, i) => (i ? (+v).toString(36) : v)).join('.'); },
+  parse(s) {
+    const p = String(s || '').trim().split('.');
+    if (p.length === 5 && p[0] === '1') {
+      const v = p.slice(1).map((x) => parseInt(x, 36));
+      if (v.every(Number.isFinite)) return { base: v[0] >>> 0, change: v[1] >>> 0, heir: v[2] >>> 0, age: clamp(v[3] | 0, 0, 9999), gen: 0 };
+    }
+    const one = codeToSeed(s);
+    return one === null ? null : { base: one, change: 0, heir: one, age: 0, gen: 0 };
   },
 };
