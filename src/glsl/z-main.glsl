@@ -9,6 +9,8 @@ out vec4 O;
 vec3 skyBase(vec3 rd) {
   float e = clamp(rd.y, 0.0, 1.0);
   float g = pow(1.0 - e, 3.4);
+  // the sky is printed in flat steps with a soft join, like the haze, not airbrushed
+  float gs = g * 7.0; g = mix(g, (floor(gs) + smoothstep(0.3, 0.7, fract(gs))) / 7.0, 0.75);
   vec3 c = mix(uInk[TOP], uInk[LOW], g);
   vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));
   vec2 rxz = normalize(rd.xz + vec2(0.0, 1e-4));
@@ -86,28 +88,28 @@ vec3 sky(vec3 rd, out float glow) {
       glow *= 1.0 - m;
     }
   }
-  // clouds: long flat bars with one lighter lip, as a block would print them
+  // clouds: flat bars cut in two inks, a body and a lighter lip, with hard edges
   if (uSky.x > 0.01 && e > 0.0) {
     float az = atan(rd.x, rd.z);
-    vec2 u = vec2(az * 1.7 + uTime * 0.002, e * 13.0 * uSky.y);
-    float n = 0.62 * vnoise(u) + 0.38 * vnoise(u * vec2(2.3, 1.9) + 17.0);
+    vec2 u = vec2(az * 2.4 + uTime * 0.002, e * 13.0 * uSky.y);
+    float n = 0.58 * vnoise(u) + 0.42 * vnoise(u * vec2(2.3, 1.9) + 17.0);
     float th = 0.86 - 0.42 * uSky.x;
-    float band = smoothstep(0.03, 0.12, e) * (1.0 - smoothstep(0.3, 0.5, e));
-    float w = 0.012 + 2.0 * uPix;
-    float m = smoothstep(th, th + w, n) * band;
-    float lip = 1.0 - smoothstep(th + 0.02, th + 0.075, n);
+    float band = smoothstep(0.03, 0.09, e) * (1.0 - smoothstep(0.3, 0.42, e));
+    float w = 0.004 + 1.2 * uPix;
+    float m = smoothstep(th, th + w, n * band + th * (1.0 - band) - 0.02 * (1.0 - band));
+    float lip = 1.0 - smoothstep(th + 0.045, th + 0.045 + w, n);
     vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));
-    float toward = max(dot(normalize(rd.xz + vec2(0.0, 1e-4)), sxz), 0.0);
-    vec3 body = mix(mix(c, uInk[PAPER], 0.5), uInk[GLOW], 0.45 * toward);
-    vec3 edge = mix(mix(c, uInk[PAPER], 0.85), uInk[GLOW], 0.3 * toward);
+    float toward = step(0.6, dot(normalize(rd.xz + vec2(0.0, 1e-4)), sxz));
+    vec3 body = mix(mix(uInk[LOW], uInk[PAPER], 0.6), uInk[GLOW], 0.35 * toward);
+    vec3 edge = mix(uInk[PAPER], uInk[GLOW], 0.25 * toward);
     c = mix(c, mix(body, edge, lip), m);
-    glow *= 1.0 - 0.8 * m;
+    glow *= 1.0 - m;
   }
   return c;
 }
 
 float hazeStep(float t) {
-  float h = 1.0 - exp(-t * uAir.x);
+  float h = 1.0 - exp(-max(t - 0.12 / uAir.x, 0.0) * uAir.x);   // nothing near is hazed at all
   float n = max(uAir.y, 1.0), x = h * n;
   float stepped = min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);
   // near things fade smoothly; only distance is cut into planes, or the first plane draws arcs on a near wall
@@ -225,6 +227,8 @@ void main() {
       // the fill light can lift a surface by one band at most, and never casts a shadow
       tone = max(tone, uFill.w * smoothstep(0.15, 0.3, dot(n, uFill.xyz)) / nb);
       vec3 shade = mix(s.shade, mix(s.shade, uInk[TOP], 0.22), clamp(n.y, 0.0, 1.0));
+      // whatever is nearest and in shadow takes the deep ink: the plate needs a true dark in front
+      shade = mix(shade, uInk[DEEP], 0.42 * exp(-t * uAir.x * 9.0));
       c = mix(shade, s.lit, tone);
       c = mix(c, uInk[DEEP], clamp(-cav * 1.4, 0.0, 0.55) * s.line);
       c = mix(c, uInk[PAPER], clamp(cav * 0.7, 0.0, 0.22) * s.line * tone);
@@ -253,10 +257,12 @@ void main() {
         ? (pi == 0 ? texelFetch(uPortTex0, ivec2(fc), 0).rgb : texelFetch(uPortTex1, ivec2(fc), 0).rgb)
         : sqrt(uPortInk[pi]);
       through *= through;
-      float lw = clamp(2.2 * uPix * tMax / (uPortC[pi].w * uPortN[pi].w), 0.004, 0.2);
-      float rim = smoothstep(1.0 - lw, 1.0 - 0.5 * lw, rr);
-      c = mix(through, uInk[PAPER], rim);
-      g = rim * 0.5;
+      // a ring of paper with a darker rebate inside it, so the door reads as a made thing
+      float lw = clamp(max(0.05, 2.6 * uPix * tMax / (uPortC[pi].w * uPortN[pi].w)), 0.004, 0.22);
+      float rim = smoothstep(1.0 - lw, 1.0 - 0.85 * lw, rr);
+      float rebate = smoothstep(1.0 - 1.55 * lw, 1.0 - 1.4 * lw, rr) * (1.0 - rim);
+      c = mix(mix(through, uInk[DEEP], rebate * 0.55), mix(uInk[PAPER], uPortInk[pi], 0.18), rim);
+      g = rim * 0.35;
       c = mix(c, uInk[DEEP], 0.7 * edge);
       if (b == 0) tFirst = tMax;
     } else if (stop == 1) {
@@ -277,15 +283,24 @@ void main() {
         vec3 nw = normalize(vec3((w2 - 0.5) * 0.05 * rp, 1.0, (w1 - 0.5) * 0.035 * rp));
         float f0 = uSea.x > 1.5 ? 0.86 : 0.42;
         float fr = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-rd, nw), 0.0, 1.0), 4.0);
-        float fine = 1.0 - smoothstep(0.12, 0.3, 26.0 * uPix / max(-rd.y, 0.004));   // strokes fade before they alias
-        float stroke = smoothstep(0.71, 0.74, w1) * smoothstep(0.35, 0.5, w2) * rp * fine;
+        // strokes of light at three scales, each shown only where it is neither a blob nor a blur,
+        // so there are strokes from the foreground to the far water and no line where they stop
+        float foot = uPix / max(-rd.y, 0.004), stroke = 0.0;
+        for (int k = uZero; k < 3; k++) {
+          float f = k == 0 ? 26.0 : (k == 1 ? 8.0 : 2.5);
+          float show = smoothstep(0.012, 0.035, f * foot) * (1.0 - smoothstep(0.1, 0.26, f * foot));
+          // the coarser the stroke, the longer it is drawn: slivers, never puddles
+          float wk = k == 0 ? w1 : vnoise(vec2(lat * (k == 1 ? 4.0 : 2.0) + float(k) * 5.3 + uTime * 0.02, ld * f * 1.6 - uTime * 0.013 * f));
+          stroke = max(stroke, show * smoothstep(0.74, 0.77, wk));
+        }
+        stroke *= smoothstep(0.35, 0.5, w2) * rp;
         vec3 body = mix(mix(uInk[SHADE], uInk[TOP], 0.5), hazeInk(rd), far * 0.94);
-        body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.5 * (1.0 - far));
+        body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.4 * (1.0 - far));
         if (b == 0 && uQ.y > 0.5 && !under) {
           float nearK = 0.4 * (1.0 - smoothstep(4.0, 70.0, dist));              // the foreground is printed a tone deeper
           fr *= 1.0 - nearK;
           acc += wgt * (1.0 - fr) * body;
-          wgt *= fr * (1.0 - 0.75 * stroke);
+          wgt *= fr * (1.0 - 0.6 * stroke);
           ro = pw + vec3(0.0, 0.01, 0.0);
           rd = reflect(rd, nw); rd.y = max(rd.y, 0.015); rd = normalize(rd);
           travelled = tMax; tMin = 0.05;

@@ -231,7 +231,7 @@ const ENG = {
     const mk = (o) => ({ c: [p[0] + o[0], p[1] + o[1], z], r: g.door.r });
     // whatever offset was still easing away after the last crossing is taken as it stands
     const eased = Math.exp(-Math.max(0, w.ta) * 0.9);
-    this.camOff = [this.camOff[0] * eased, this.camOff[1] * eased];
+    this.camOff = [mix(g.comp.x, this.camOff[0], eased), mix(g.comp.y, this.camOff[1], eased)];
     // hands-off, the flight looks once more at each place, changed, and then moves on
     const auto = this.journey.kinRun >= 1 ? 1 : 0;
     this.doors = { z, born: w.ta, auto, chosen: auto, picked: false, d: [mk(g.door.kin), mk(g.door.stranger)], open: 0, gaze: [0, 0] };
@@ -259,8 +259,8 @@ const ENG = {
     // the line of flight bends to pass through the centre of the chosen portal
     const o = D.chosen === 0 ? g.door.kin : g.door.stranger;
     const pull = 1 - smooth(g.speed * 2.5, g.speed * (g.door.from || 10), left);
-    this.camOff[0] = damp(this.camOff[0], o[0] * pull, 2.5, dt);
-    this.camOff[1] = damp(this.camOff[1], o[1] * pull, 2.5, dt);
+    this.camOff[0] = damp(this.camOff[0], mix(g.comp.x, o[0], pull), 2.5, dt);
+    this.camOff[1] = damp(this.camOff[1], mix(g.comp.y, o[1], pull), 2.5, dt);
     if (left <= g.speed * 0.004) this.cross();             // a hair early: on the plane itself the door has no depth
   },
 
@@ -307,7 +307,9 @@ const ENG = {
     const g = w.g, z = w.z;
     const p = WORLD.pathAt(g, z);
     const settle = Math.exp(-Math.max(0, w.ta) * 0.9);     // offsets carried through a portal ease away
-    const off = this.doors ? this.camOff : [this.camOff[0] * settle, this.camOff[1] * settle];
+    // a place has its own vantage: a little to one side of its line, turned a little back across it
+    const cp = g.comp;
+    const off = this.doors ? this.camOff : [mix(cp.x, this.camOff[0], settle), mix(cp.y, this.camOff[1], settle)];
     const pos = [p[0] + off[0], p[1] + off[1], z];
     const lead = g.lead;
     const q = WORLD.pathAt(g, z + lead);
@@ -321,17 +323,22 @@ const ENG = {
       const dir = V.norm(V.sub(sp, pos)), base = V.norm(V.sub(tgt, pos));
       tgt = V.add(pos, V.norm(V.mix(base, dir, a)));
     }
+    let doorPull = 0;
     if (this.doors) {
       const D = this.doors, c = D.d[D.chosen].c, left = D.z - z;
       const a = 0.75 * smooth(g.speed * 13, g.speed * 5, left) * D.open;
+      doorPull = a / 0.75;
       // aim through the door at a point well beyond it: aiming at its centre has no meaning at the threshold
       const dir = V.norm(V.sub([c[0], c[1], c[2] + 30], pos)), base = V.norm(V.sub(tgt, pos));
       tgt = V.add(pos, V.norm(V.mix(base, dir, a)));
     }
     let f = V.norm(V.sub(tgt, pos));
     // the heading carried through the last portal eases into this world's own line
-    const cy = this.carry[0] * settle, cp = this.carry[1] * settle;
-    const by = Math.atan2(f[0], f[2]) + cy, bp = clamp(Math.asin(clamp(f[1], -1, 1)) + cp, -1.2, 1.2);
+    const cy = this.carry[0] * settle, cpi = this.carry[1] * settle;
+    const aspectNow = this.rw / this.rh;
+    // the vantage's turn gives way as a door takes the eye; a tall screen looks down a little to keep the ground
+    const turn = cp.yaw * (1 - doorPull), stoop = aspectNow < 1 ? -0.22 * (1 - aspectNow) : 0;
+    const by = Math.atan2(f[0], f[2]) + cy + turn, bp = clamp(Math.asin(clamp(f[1], -1, 1)) + cpi + stoop, -1.2, 1.2);
     const fwdBase = [Math.sin(by) * Math.cos(bp), Math.sin(bp), Math.cos(by) * Math.cos(bp)];
     // the viewer's own look, on top
     const L = this.look;

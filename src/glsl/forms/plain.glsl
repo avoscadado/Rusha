@@ -19,7 +19,7 @@ float thing(vec3 q, float kind, float H, float W, vec4 r, bool odd) {
   float ex = odd ? uTr[7] : 0.0;
   if (ex > 1.5 && ex < 2.5) return 1e5;                       // the absent one
   if (ex > 2.5 && ex < 3.5) { H *= 2.4; W *= 1.9; }           // the colossal one
-  if (ex > 3.5) { q.xy = rot(1.32) * (q.xy - vec2(0.0, W)); q.y += W; }   // the fallen one
+  if (ex > 3.5) { q.zy = rot(1.32) * (q.zy - vec2(0.0, W)); q.y += W; }   // the fallen one: it lies along its row, clear of the line
   float d;
   if (kind < 1.5) {                                            // pylon
     float w = W * (1.0 - 0.55 * clamp(q.y / H, 0.0, 1.0));

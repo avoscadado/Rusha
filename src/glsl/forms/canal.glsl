@@ -34,18 +34,21 @@ float bridgeD(vec3 p) {
   float Wc = uTr[0], hs = uTr[6];
   float zb = mod(p.z + uTr[5] * 0.5, uTr[5]) - uTr[5] * 0.5;
   float R = (Wc * Wc + (hs - 1.0) * (hs - 1.0)) / (2.0 * (hs - 1.0));
-  float ring = abs(length(vec2(p.x, p.y - hs + R)) - R - 0.4) - 0.4;
-  return max(max(ring, abs(zb) - 1.7), max(abs(p.x) - Wc - 0.6, 0.8 - p.y));
+  float px = p.x - pathXY(p.z).x;
+  float ring = abs(length(vec2(px, p.y - hs + R)) - R - 0.4) - 0.4;
+  return max(max(ring, abs(zb) - 1.7), max(abs(px) - Wc - 0.6, 0.8 - p.y));
 }
 
 float map(vec3 p) {
   float Wc = uTr[0], B = uTr[1], Q = uTr[4];
-  float ax = abs(p.x), side = p.x < 0.0 ? -1.0 : 1.0;
+  // the canal bends with the flight line, so its far end is always round a corner
+  float px = p.x - pathXY(p.z).x;
+  float ax = abs(px), side = px < 0.0 ? -1.0 : 1.0;
   float d = p.y + 3.0;                                       // the bed of the canal
   vec2 q2 = vec2(Wc - ax, p.y - 1.0);                        // the quays
   d = min(d, length(max(q2, 0.0)) + min(max(q2.x, q2.y), 0.0));
   float roofs = (uTr[2] + uTr[3]) * 1.8 + 2.0;                // nothing stands higher than this
-  if (p.y > roofs + 1.0) { gD = 1e3; return p.y - roofs; }    // a safe step; no surface is near, so no shadow or ink line
+  if (p.y > roofs + 1.0) { gD = 1e3; return (p.y - roofs) * 0.94; }    // a safe step; no surface is near, so no shadow or ink line
   float cz = floor(p.z / B), qz = p.z - (cz + 0.5) * B;
   // this house and its nearer neighbour: a side wall stands on the line between two cells,
   // and has to be there from both sides
@@ -58,7 +61,7 @@ float map(vec3 p) {
     float top = 2.7 * (1.0 - smoothstep(70.0, 120.0, away));
     d = min(d, max(length(vec2(ax - Wc + 1.3, zp)) - 0.16 - min(0.7 * uPix * away, 0.2), p.y - top));
   }
-  d = min(d, setPiece(p));
+  d = min(d * 0.94, setPiece(p));                             // the bend shears distances a little: stay under them
   gD = d;
   return min(d, cellExitZ(qz, B));
 }
@@ -66,7 +69,8 @@ float map(vec3 p) {
 Surf surf(vec3 p, vec3 n, float t) {
   if (setPiece(p) < 0.02 + 0.002 * t) return setSurf(p);
   float Wc = uTr[0], B = uTr[1], Q = uTr[4], st = uTr[8];
-  float ax = abs(p.x), side = p.x < 0.0 ? -1.0 : 1.0;
+  float px = p.x - pathXY(p.z).x;
+  float ax = abs(px), side = px < 0.0 ? -1.0 : 1.0;
   Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.3), 0.0, 1.0);
   float wet = uSea.x > 0.5 ? (1.0 - smoothstep(uSea.y + 0.35, uSea.y + 0.7, p.y)) : 0.0;
   if (p.y < -2.9) { s.lit = mix(uInk[LIT], uInk[SHADE], 0.45); s.shade = uInk[SHADE]; s.line = 0.0; return s; }
@@ -76,7 +80,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   }
   if (ax < Wc - 0.5) {                                        // a mooring pole, with a painted head
     s.lit = mix(uInk[SHADE], uInk[LIT], 0.3); s.shade = uInk[DEEP];
-    if (p.y > 2.1) { s.lit = uInk[PAPER]; s.shade = mix(uInk[PAPER], uInk[SHADE], 0.5); }
+    if (p.y > 2.1) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[DEEP], 0.4); }       // the accent ink, in small
     return s;
   }
   // which house this point belongs to: step a little into the wall before asking

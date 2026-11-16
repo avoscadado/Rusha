@@ -33,16 +33,16 @@ const SETS = {
 };
 
 const CHANGES = {
-  night:   { label: 'at night',       line: 'The same place after dark.' },
-  dusk:    { label: 'at dusk',        line: 'The same place with the sun going.' },
-  dawn:    { label: 'at first light', line: 'The same place before anyone is up.' },
-  noon:    { label: 'at noon',        line: 'The same place with the sun overhead and nowhere to hide.' },
-  flooded: { label: 'flooded',        line: 'The same place. The water came and has not left.' },
-  drained: { label: 'drained',        line: 'The same place with the water gone.' },
-  mist:    { label: 'in mist',        line: 'The same place. The mist has taken everything below the knee.' },
-  snow:    { label: 'under snow',     line: 'The same place. It has been snowing for some time.' },
-  emptied: { label: 'emptied',        line: 'The same place with everything taken away but the ground.' },
-  later:   { label: 'much later',     line: 'The same place a long time afterwards.' },
+  night:   { label: 'at night',       line: 'Night has come and nothing else has moved.' },
+  dusk:    { label: 'at dusk',        line: 'The sun is going. Everything has a long shadow and keeps it.' },
+  dawn:    { label: 'at first light', line: 'First light. Nobody is up.' },
+  noon:    { label: 'at noon',        line: 'The sun is overhead and there is nowhere to hide.' },
+  flooded: { label: 'flooded',        line: 'The water came and has not left.' },
+  drained: { label: 'drained',        line: 'The water has gone and left its floor behind.' },
+  mist:    { label: 'in mist',        line: 'Mist has taken everything below the knee.' },
+  snow:    { label: 'under snow',     line: 'It has been snowing for some time.' },
+  emptied: { label: 'emptied',        line: 'Everything has been taken away but the ground.' },
+  later:   { label: 'much later',     line: 'A long time has passed. It shows.' },
 };
 
 const MOONS = [
@@ -51,7 +51,6 @@ const MOONS = [
   { id: 'red',      w: 2, label: 'red moon' },
   { id: 'crescent', w: 2, label: 'thin moon' },
   { id: 'pale',     w: 2, label: 'full moon' },
-  { id: 'twin',     w: 1.5, label: 'pair of moons' },
 ];
 
 const MODES = {
@@ -75,6 +74,7 @@ const WORLD = {
       key, form: null,
       tr: new Float32Array(16),
       path: { ax: 0, fx: 0, px: 0, ay: 0, fy: 0, py: 0, y0: 6 },
+      comp: { x: 0, y: 0, yaw: 0 },                          // the vantage: offset from the line, and a turn
       speed: 14, lead: 60, tilt: 0, focal: 2.05,
       sunAz: 0.6, sunEl: 0.35, sun: [0.03, 1, 3, 9],
       air: [0.0016, 6, -100, 0], sea: [0, 0, 1, 0],
@@ -138,16 +138,14 @@ const WORLD = {
     if (m.id === 'none' || g.interior) return;
     // opposite the sun, and high enough to clear the horizon furniture
     const side = g.sunAz > 0 ? -1 : 1;
-    const az = side * r.range(0.22, 0.5), el = r.range(0.2, 0.36), size = r.range(0.045, 0.085);
+    let az = side * r.range(0.22, 0.5), el = r.range(0.2, 0.36);
+    const size = r.range(0.045, 0.085);
+    // one body to a sky: by night the heirloom moon is the light itself
+    if (g.pal.hour === 0) { az = g.sunAz; el = g.sunEl; g.sun = [0, g.sun[1], g.sun[2], g.sun[3]]; }
     const dir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
     const phase = m.id === 'crescent' ? 0.55 * side : m.id === 'pale' || m.id === 'ringed' ? 0 : r.pick([0, 0.8 * side]);
     g.body.set([dir[0], dir[1], dir[2], m.id === 'crescent' ? size * 1.2 : size], 0);
     g.bodyK.set([phase, m.id === 'ringed' ? 1 : 0, m.id === 'red' ? 0.85 : 0, 0], 0);
-    if (m.id === 'twin') {
-      const az2 = az + side * 0.16, el2 = el + 0.09;
-      g.body.set([Math.sin(az2) * Math.cos(el2), Math.sin(el2), Math.cos(az2) * Math.cos(el2), size * 0.45], 4);
-      g.bodyK.set([phase, 0, 0.3, 0], 4);
-    }
   },
 
   pickChange(g, change, F) {
@@ -204,12 +202,12 @@ const WORLD = {
     if (g.changeType) {
       const c = CHANGES[g.changeType];
       name = `${w.name}, ${c.label}`;
-      line = (F.changeLines && F.changeLines[g.changeType]) || c.line;
+      line = (g.changeType === 'later' && g.laterLine) || (F.changeLines && F.changeLines[g.changeType]) || c.line;
     }
     if (g.heir.label && g.heir.age >= 2 && !g.interior) {
       line += ` The ${g.heir.label} has followed for ${numWord(g.heir.age + 1)} plates.`;
     }
-    g.name = name; g.line = line; g.baseName = w.name;
+    g.name = name; g.line = line; g.baseName = w.name; g.data = w.data || '';
   },
 
   audio(g, key) {

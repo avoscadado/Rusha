@@ -44,11 +44,8 @@ const PALETTES = [
   ['Sea Glass',           2, -0.6, '#3f8fb8','#bfe6e0','#ffffff','#7fc9c0','#2f6f80','#103540','#f2fbf8','#ff7f50'],
 
   // strange inks: skies that are not air
-  ['Absinthe',            1,  0.0, '#0f2a1a','#b7d94f','#f7ffb0','#7fa83a','#1f4a2a','#0a1a10','#f6fbdc','#e03a7a'],
   ['Oxblood Sky',         2,  0.8, '#5a0f1a','#e8a08a','#ffe2c9','#c9584f','#5a1a2a','#22080f','#fbe9de','#3ac0c9'],
   ['Negative',            2, -0.4, '#e9e4d6','#9fa9c0','#ffffff','#3a4266','#1a1f3a','#0a0c1a','#fbf8ee','#ff4a2e'],
-  ['Ultraviolet',         0, -0.2, '#0a0420','#4a1fa0','#c08aff','#6a3fd0','#22104f','#070314','#efe6ff','#3affc0'],
-  ['Sulphur',             2,  0.7, '#6a6a2a','#f2e27a','#fffbc0','#d9c24a','#6a5a22','#2a240c','#fffbe0','#3a5fd9'],
   ['Litmus',              1, -0.2, '#1a3a6a','#f08fb0','#ffe0f0','#c96a9a','#3a3a7a','#141a3a','#fbeef5','#7fe0a0'],
 ].map((p) => {
   const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255].map((c) => Math.pow(c, 2.2)); };
