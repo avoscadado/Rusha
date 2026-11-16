@@ -3186,6 +3186,7 @@ const UI = {
     x.fillText(g.name, m, m + src.height + 34 * u);
     x.font = `${Math.round(13.5 * u)}px "Iowan Old Style", Palatino, Georgia, serif`;
     x.fillText(g.line.length > 150 ? g.line.slice(0, 149) + '…' : g.line, m, m + src.height + 68 * u, src.width);
+    /*STANDALONE*/
     c.toBlob((blob) => {
       if (!blob) { this.toast('Could not save the plate'); return; }
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
@@ -3193,6 +3194,7 @@ const UI = {
       document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       this.toast('Plate saved');
     }, 'image/png');
+    /*END*/
   },
 
   fullscreen() {

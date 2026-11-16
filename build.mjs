@@ -71,7 +71,9 @@ if (artifact) {
     .replace(/<meta charset[^>]*>\s*/i, '').replace(/<meta name="viewport"[^>]*>\s*/i, '');
 }
 put('/*GLSL*/', 'const ARTIFACT = ' + artifact + ';\nconst GLSL = ' + JSON.stringify(glsl).replace(/<\/script/gi, '<\\/script') + ';');
-put('/*JS*/', js.replace(/<\/script/gi, '<\\/script'));
+// a host that forbids downloads gets a page with no download code in it at all
+const jsOut = artifact ? js.replace(/\/\*STANDALONE\*\/[\s\S]*?\/\*END\*\//g, '') : js;
+put('/*JS*/', jsOut.replace(/<\/script/gi, '<\\/script'));
 
 if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /\bfetch\s*\(|XMLHttpRequest|importScripts/.test(html)) {
   throw new Error('index.html must stay self-contained: found an external reference or network call');
