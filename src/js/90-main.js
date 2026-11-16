@@ -3,7 +3,7 @@ const Q = new URLSearchParams(location.search);
 const qn = (k, d) => (Q.has(k) && Number.isFinite(+Q.get(k)) ? +Q.get(k) : d);
 
 // First plates for a new visitor: seeds chosen by eye from contact sheets.
-const PILOTS = [];
+const PILOTS = ['1-r2-0-r2-0', '1-r4-0-r4-0', '1-r6-0-r6-0', '1-r7-0-r7-0', '1-r14-0-r14-0', '1-r13-0-r13-0', '1-r3-0-r3-0', '1-r15-0-r15-0', '1-r12-0-r12-0', '1-r16-0-r16-0'];
 
 function hashKey() {
   if (location.hash.length < 2) return null;

@@ -214,7 +214,7 @@ void main() {
           float y = gD < 1.8 * ph ? gD * gD / (2.0 * max(ph, 1e-4)) : 0.0, dd = sqrt(max(gD * gD - y * y, 0.0));
           sh = min(sh, uSun.w * dd / max(st - y, 1e-3));
           ph = gD;
-          st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
+          st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.07);     // short steps: a hard shadow edge shows every one that is skipped
           if (sh < 0.02 || st > SHFAR) break;
         }
         sh = smoothstep(0.4, 0.52, sh);                    // a printed shadow has one edge, not a gradient

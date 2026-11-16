@@ -7,7 +7,7 @@ const ENG = {
   rw: 2, rh: 2,            // size of the world pass (the plate is printed small, then enlarged)
   budget: 0.45e6,          // pixels in the world pass; the governor moves this
   budgetMax: 3.2e6, budgetMin: 0.1e6,
-  quality: { steps: 96, reflect: 44, shadow: 26 },
+  quality: { steps: 96, reflect: 44, shadow: 34 },
   progs: new Map(),        // form name -> program, kept for the session
   badForms: new Set(),
   cur: null,               // the world we are in

@@ -103,7 +103,9 @@ Surf surf(vec3 p, vec3 n, float t) {
   if (odd && uTr[12] < 1.5) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[DEEP], 0.45); s.glow = 0.06; }
   if (p.y > h - 0.02) { s.lit = mix(uInk[SHADE], uInk[LIT], 0.4); s.shade = mix(uInk[SHADE], uInk[DEEP], 0.5); return s; }   // the roof
   if (front) {
-    float fade = exp(-t * 0.0035);
+    // windows are left out once a row of them would be finer than the picture can hold
+    float foot = uPix * t / max(abs(dot(n, normalize(p - uCamP))), 0.04);
+    float fade = exp(-t * 0.0035) * (1.0 - smoothstep(0.22 * uTr[7], 0.5 * uTr[7], foot));
     // a pale band under the roof and a darker one at the water door
     s.lit = mix(s.lit, uInk[PAPER], 0.6 * step(h - 0.55, p.y));
     float lo = 1.0 - step(1.0 + st * 0.9, p.y);
