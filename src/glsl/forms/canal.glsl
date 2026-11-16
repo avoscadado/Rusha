@@ -80,7 +80,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     return s;
   }
   // which house this point belongs to: step a little into the wall before asking
-  float zin = p.z - n.z * 0.06;
+  float zin = p.z - n.z * (0.06 + 0.9 * uPix * t);           // further in at a distance, where the march stops shorter
   float cz = floor(zin / B), qz = p.z - (cz + 0.5) * B;
   vec4 r = house(cz, side);
   float h = houseH(cz, side, r);
