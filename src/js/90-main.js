@@ -32,6 +32,7 @@ function boot() {
   ENG.debug = qn('debug', 0);
   if (Q.has('steps')) ENG.quality.steps = qn('steps', 96);
   if (GLX.caps.software && !shot) { ENG.budget = 0.07e6; ENG.budgetMax = 0.16e6; ENG.budgetMin = 0.04e6; ENG.quality = { steps: 72, reflect: 28, shadow: 18 }; }
+  else if (matchMedia('(pointer: coarse)').matches) { ENG.budget = 0.3e6; ENG.budgetMax = 1.8e6; }   // phones and tablets start lower
   if (Q.has('mp')) ENG.budget = qn('mp', 0.3) * 1e6;
 
   const key = startKey();

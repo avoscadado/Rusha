@@ -63,6 +63,9 @@ FORMS.name = {
 };
 ```
 
+Draw each independent trait from its own stream (`S('sway')`, `S('odd')`) where you can: a stream added later then
+leaves every existing place as it was.
+
 `build` sets: `g.tr` (16 floats), `g.path` (`ax fx px` sideways sine, `ay fy py` vertical sine, `y0` height),
 `g.speed` (m/s), `g.lead` (how far ahead the camera looks), `g.tilt`, `g.focal`, `g.sea` `[mode, level, ripple, 0]`
 (mode 0 none, 1 water, 2 mirror, 3 a sea of mist), `g.air` `[haze density, haze planes, mist top, mist density]`,

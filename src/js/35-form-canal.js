@@ -13,7 +13,8 @@ FORMS.canal = {
     const odd = r.weighted([[0, 3], [1, 2.5], [2, 2.5], [3, 2]]);
     g.speed = r.range(5.4, 7.4); g.lead = 44; g.tilt = 0.012; g.focal = 1.9;
     g.path.y0 = r.range(2.6, 3.6);
-    g.path.ax = r.range(0.6, Math.min(2.2, half - 5)); g.path.fx = TAU / r.range(240, 380); g.path.px = r.range(0, TAU);
+    const sw = S('sway');
+    g.path.ax = sw.range(0.6, Math.min(2.2, half - 5)); g.path.fx = TAU / sw.range(240, 380); g.path.px = sw.range(0, TAU);
     const oz = Math.round((g.speed * r.range(15, 21)) / B), side = r.chance(0.5) ? 1 : -1;
     const dusk = g.pal.hour !== 2;
     const lit = g.pal.hour === 0 ? r.range(0.12, 0.3) : g.pal.hour === 1 ? r.range(0, 0.08) : 0;

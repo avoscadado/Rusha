@@ -14,7 +14,8 @@ FORMS.cistern = {
     const odd = r.weighted([[0, 3], [1, 2.5], [2, 1.5], [3, 2]]);
     g.speed = r.range(4.6, 6.4); g.lead = 34; g.tilt = 0; g.focal = 1.85;
     g.path.y0 = r.range(2.1, 3.0);
-    g.path.ax = r.range(0.3, 0.7); g.path.fx = TAU / r.range(160, 260); g.path.px = r.range(0, TAU);
+    const sw = S('sway');
+    g.path.ax = sw.range(0.3, 0.7); g.path.fx = TAU / sw.range(160, 260); g.path.px = sw.range(0, TAU);
     const oz = Math.round((g.speed * r.range(15, 21)) / bay), side = r.chance(0.5) ? 1 : -1;
     const lamps = !hole || r.chance(0.3) ? 1 : 0;
     g.tr.set([bay, H, spring, rad, r.chance(0.3) ? 1 : 0, arc, hole, every, oz, odd, side, rad * 0.75, lamps, 0]);

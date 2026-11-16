@@ -5,8 +5,8 @@ const ENG = {
   gl: null, canvas: null,
   cw: 2, ch: 2,            // canvas backing store
   rw: 2, rh: 2,            // size of the world pass (the plate is printed small, then enlarged)
-  budget: 0.30e6,          // pixels in the world pass; the governor moves this
-  budgetMax: 1.6e6, budgetMin: 0.1e6,
+  budget: 0.45e6,          // pixels in the world pass; the governor moves this
+  budgetMax: 3.2e6, budgetMin: 0.1e6,
   quality: { steps: 96, reflect: 44, shadow: 26 },
   progs: new Map(),        // form name -> program, kept for the session
   badForms: new Set(),
@@ -99,7 +99,8 @@ const ENG = {
       if (cap < 1) { cw = Math.round(cw * Math.sqrt(cap)); ch = Math.round(ch * Math.sqrt(cap)); }
       if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
     }
-    const s = this.fixed ? 1 : Math.min(1, Math.sqrt(this.budget / (cw * ch)));
+    // with power to spare the plate is drawn larger than the screen and reduced, which smooths its edges
+    const s = this.fixed ? 1 : Math.min(1.42, Math.sqrt(this.budget / (cw * ch)));
     const rw = Math.max(2, Math.round(cw * s / 2) * 2), rh = Math.max(2, Math.round(ch * s / 2) * 2);
     if (!force && this.tg && rw === this.rw && rh === this.rh && cw === this.cw && ch === this.ch) return;
     this.cw = cw; this.ch = ch; this.rw = rw; this.rh = rh;
@@ -459,7 +460,7 @@ const ENG = {
       this.resize();
     } else if (avg < target * 1.04) {
       G.hold += 0.8;
-      if (G.hold >= G.wait && this.budget < this.budgetMax && this.rw < this.cw) {
+      if (G.hold >= G.wait && this.budget < this.budgetMax && this.rw < this.cw * 1.4) {
         this.budget = Math.min(this.budgetMax, this.budget * 1.15); G.hold = 0; this.resize();
       }
     } else G.hold = 0;

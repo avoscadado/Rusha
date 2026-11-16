@@ -11,7 +11,8 @@ FORMS.stair = {
     const painted = r.chance(0.45) ? 1 : 0;
     g.speed = r.range(6, 8); g.lead = 46; g.tilt = 0.02; g.focal = 1.9;
     g.path.y0 = r.range(2.6, 3.8);
-    g.path.ax = r.range(0.4, Math.min(1.4, half - 4)); g.path.fx = TAU / r.range(240, 380); g.path.px = r.range(0, TAU);
+    const sw = S('sway');
+    g.path.ax = sw.range(0.4, Math.min(1.4, half - 4)); g.path.fx = TAU / sw.range(240, 380); g.path.px = sw.range(0, TAU);
     const side = r.chance(0.5) ? 1 : -1, lvl = under + r.int(1, Math.min(3, N - 2));
     const oz = Math.round((g.speed * r.range(15, 20)) / P);
     const lamps = kiosks && g.pal.hour !== 2 ? 1 : 0;

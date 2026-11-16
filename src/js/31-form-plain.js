@@ -23,7 +23,8 @@ FORMS.plain = {
     g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.012;
     g.path.y0 = r.range(3.4, 6.5);
     // the line wanders a little between its two rows
-    g.path.ax = r.range(1.5, Math.min(5, spacing * 0.5 - W - 3.5)); g.path.fx = TAU / r.range(260, 420); g.path.px = r.range(0, TAU);
+    const sw = S('sway');
+    g.path.ax = sw.range(1.5, Math.min(5, spacing * 0.5 - W - 3.5)); g.path.fx = TAU / sw.range(260, 420); g.path.px = sw.range(0, TAU);
     const lineX = (z) => g.path.ax * Math.sin(z * g.path.fx + g.path.px);
     const hasSet = r.chance(0.5);
     let odd = kind === 5 ? r.pick([1, 3]) : kind === 3 ? r.pick([1, 2, 3, 4]) : r.int(1, 4);
