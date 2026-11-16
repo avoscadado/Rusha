@@ -177,7 +177,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   vec3 q = vFrame(p, sgn, sid, cdx);
   float S = uTr[0], Hm = uTr[1], T = uTr[2], pw = uTr[4], w = uTr[5], k = uTr[6], hs = uTr[7], fy = uTr[11];
   float N = mod(uTr[3], 10.0), nUp = floor(uTr[3] * 0.1 + 0.01);
-  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.4), 0.0, 1.0);
+  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.4), 0.0, 0.4);
   if (p.y - fy < 0.05 + 0.004 * t && n.y > 0.8) {  // the ground: level and plain
     s.lit = uInk[LIT]; s.shade = uInk[SHADE]; s.line = 0.0;
     float pave = abs(q.x) - w - 5.5 - vBit(4.0) * 0.5 * w;                       // a strip of paving the piers stand on
