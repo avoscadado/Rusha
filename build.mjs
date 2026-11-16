@@ -60,12 +60,20 @@ const put = (marker, text) => {
   html = html.split(marker).join(text);   // split/join: no $ substitution surprises
 };
 put('/*CSS*/', css);
-put('/*GLSL*/', 'const GLSL = ' + JSON.stringify(glsl).replace(/<\/script/gi, '<\\/script') + ';');
+// --artifact: the same page without its document wrapper, for hosts that supply their own,
+// and without the two controls such a host cannot honour (file downloads, its own address).
+const artifact = process.argv.includes('--artifact');
+if (artifact) {
+  html = html.replace(/<!doctype html>\s*/i, '').replace(/<\/?(html|head|body)[^>]*>\s*/gi, '')
+    .replace(/<meta charset[^>]*>\s*/i, '').replace(/<meta name="viewport"[^>]*>\s*/i, '');
+}
+put('/*GLSL*/', 'const ARTIFACT = ' + artifact + ';\nconst GLSL = ' + JSON.stringify(glsl).replace(/<\/script/gi, '<\\/script') + ';');
 put('/*JS*/', js.replace(/<\/script/gi, '<\\/script'));
 
 if (/\b(?:src|href)\s*=\s*["']https?:/i.test(html) || /\bfetch\s*\(|XMLHttpRequest|importScripts/.test(html)) {
   throw new Error('index.html must stay self-contained: found an external reference or network call');
 }
-const outFile = process.argv[2] ? path.resolve(process.argv[2]) : path.join(root, 'index.html');
+const outArg = process.argv.slice(2).find((a) => !a.startsWith('--'));
+const outFile = outArg ? path.resolve(outArg) : path.join(root, 'index.html');
 fs.writeFileSync(outFile, html);
 console.log(`${path.basename(outFile)} ${(html.length / 1024).toFixed(1)} KB  (${Object.keys(glsl).length} glsl, ${jsFiles.length} js)`);

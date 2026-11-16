@@ -21,7 +21,7 @@ const check = (name, ok, extra = '') => { console.log((ok ? 'ok   ' : 'FAIL ') +
 { // 2. context lost and restored mid-flight
   const page = await browser.newPage({ viewport: { width: 900, height: 600 } }); const errs = [];
   page.on('pageerror', (e) => errs.push(String(e)));
-  await page.goto(url + '?form=plain#1.c7.0.c7.0');
+  await page.goto(url + '?form=plain#1-c7-0-c7-0');
   await page.waitForSelector('#veil.peek', { timeout: 90000 });
   await page.click('#go-quiet'); await page.waitForTimeout(3500);
   const before = await page.evaluate(() => window.__ks.info());

@@ -239,8 +239,8 @@ const UI = {
       else if (k === 'g') this.setGentle(!ENG.gentle);
       else if (k === 'l') this.setStay(!ENG.linger);
       else if (k === 'f') this.fullscreen();
-      else if (k === 'c') this.copyLink();
-      else if (k === 'p') this.photo();
+      else if (k === 'c' && !ARTIFACT) this.copyLink();
+      else if (k === 'p' && !ARTIFACT) this.photo();
       else if (k === '1') ENG.choose(0);
       else if (k === '2') ENG.choose(1);
       else if (k === 'ArrowLeft') nudge(-0.16, 0);
@@ -254,8 +254,10 @@ const UI = {
     window.addEventListener('pointermove', () => this.wake(), { passive: true });
     document.addEventListener('visibilitychange', () => {
       this.hidden = document.hidden;
+      if (!document.hidden && this.begun) this.keepAwake();
       if (hasAudio && AUDIO.ready && this.soundOn) AUDIO.setEnabled(!document.hidden);
     });
+    if (ARTIFACT) { $('b-copy').hidden = true; $('b-photo').hidden = true; }
     $('go-sound').onclick = () => this.begin(true);
     $('go-quiet').onclick = () => this.begin(false);
   },
@@ -275,7 +277,15 @@ const UI = {
     setTimeout(() => veil.classList.add('gone'), 2700);
     if (withSound) this.setSound(true);
     ENG.started = true; if (ENG.cur) ENG.cur.ta = 0;
+    this.keepAwake();
 
+  },
+
+  // ask the screen to stay on while the flight runs; many places refuse, which is fine
+  keepAwake() {
+    try {
+      if (navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then((l) => { this._wl = l; }).catch(() => {});
+    } catch (e) { /* not available */ }
   },
 
   // called by the engine

@@ -1,7 +1,7 @@
 @property --hole { syntax: '<length-percentage>'; inherits: false; initial-value: 0px; }
 :root {
   --paper: #f4ecdc; --ink: #1c1b22; --soft: rgba(28,27,34,.56); --hair: rgba(28,27,34,.18); --accent: #e23d28;
-  --mat: clamp(12px, 2.6vmin, 38px);
+  --mat: clamp(16px, 2.6vmin, 38px);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
@@ -38,7 +38,7 @@ button:focus-visible, #line a:focus-visible { outline: 2px solid var(--accent); 
 #more { position: absolute; right: 0; bottom: calc(100% + 16px); z-index: 10; white-space: normal;
   width: min(430px, calc(100vw - 2 * var(--mat) - 8px)); max-height: min(70vh, 560px); overflow: auto; padding: 18px 20px 16px;
   background: var(--paper); color: var(--ink); box-shadow: 0 0 0 1px var(--hair), 0 18px 50px rgba(0,0,0,.28); transition: background-color 2.6s ease, color 2.6s ease; }
-#more[hidden] { display: none; }
+#more[hidden], #more button[hidden] { display: none; }
 #more h2 { margin: 14px 0 9px; color: var(--soft); font-weight: 600; }
 #more h2:first-child { margin-top: 0; }
 #more .row { display: flex; flex-wrap: wrap; gap: 6px 22px; }

@@ -253,10 +253,11 @@ const WORLD = {
     return L;
   },
 
-  // share codes: version, then the four parts of the key in base 36
-  code(key) { return ['1', key.base >>> 0, key.change >>> 0, key.heir >>> 0, key.age | 0].map((v, i) => (i ? (+v).toString(36) : v)).join('.'); },
+  // share codes: version, then the four parts of the key in base 36, joined by hyphens
+  // (letters, digits and hyphens survive every kind of link)
+  code(key) { return ['1', key.base >>> 0, key.change >>> 0, key.heir >>> 0, key.age | 0].map((v, i) => (i ? (+v).toString(36) : v)).join('-'); },
   parse(s) {
-    const p = String(s || '').trim().split('.');
+    const p = String(s || '').trim().toLowerCase().split(/[-.]/);
     if (p.length === 5 && p[0] === '1') {
       const v = p.slice(1).map((x) => parseInt(x, 36));
       if (v.every(Number.isFinite)) return { base: v[0] >>> 0, change: v[1] >>> 0, heir: v[2] >>> 0, age: clamp(v[3] | 0, 0, 9999), gen: 0 };
