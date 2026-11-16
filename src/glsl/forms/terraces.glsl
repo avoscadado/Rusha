@@ -262,7 +262,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   float bund = floor0 ? 1.0 - smoothstep(0.6 * w, 0.6 * w + px, (0.5 - abs(fract(fu) - 0.5)) * fw)
                       : 1.0 - smoothstep(w, w + px, (R.x - Te * j0) / g);
   float cross = 1.0 - smoothstep(0.6 * w, 0.6 * w + px, (0.5 - abs(fract(fl) - 0.5)) * 46.0);
-  bund = max(bund, cross) * fade * (floor0 ? uTr[8] : 0.35 + 0.65 * uTr[8]) * (1.0 - uTr[13]) * (1.0 - thin);
+  bund = max(bund, cross) * fade * (floor0 ? 0.3 + 0.7 * uTr[8] : 0.35 + 0.65 * uTr[8]) * (1.0 - uTr[13]) * (1.0 - thin);
   s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.6), bund);
   s.shade = mix(s.shade, mix(uInk[SHADE], uInk[DEEP], 0.5), bund);
   if (floor0 && uTr[14] > 0.5) {

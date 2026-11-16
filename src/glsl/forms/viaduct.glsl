@@ -156,7 +156,7 @@ float map(vec3 p) {
   d = max(d, (q.y - mix(Hc + 12.0, min(fy, uSea.y) - 1.0, smoothstep(0.55 * FAR, 0.97 * FAR, dc))) * 0.97);
 
   float fl = p.y - fy;
-  gD = min(d, fl);
+  gD = gRd.y > 1e-4 ? d : min(d, fl);              // a ray that is going up has nothing to do with the floor
   // Along a ray, some distances are known exactly: to the floor when the ray goes down,
   // and to the slab of air the viaduct stands in when the ray is outside it.
   if (dot(gRd, gRd) > 0.5) {

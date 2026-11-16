@@ -121,9 +121,9 @@ const WORLD = {
   light(g, r) {
     const hour = g.pal.hour;
     const side = r.chance(0.5) ? 1 : -1;
-    if (hour === 1) { g.sunAz = side * r.range(0.12, 0.5); g.sunEl = r.range(0.05, 0.16); g.sun = [0.045, 1.6, 3, 10]; }
-    else if (hour === 2) { g.sunAz = side * r.range(0.5, 1.1); g.sunEl = r.range(0.42, 0.85); g.sun = [0.026, 0.7, 3, 14]; }
-    else { g.sunAz = side * r.range(0.25, 0.8); g.sunEl = r.range(0.3, 0.6); g.sun = [0.05, 0.9, 2, 12]; }
+    if (hour === 1) { g.sunAz = side * r.range(0.12, 0.5); g.sunEl = r.range(0.05, 0.16); g.sun = [0.045, 1.6, 3, 24]; }
+    else if (hour === 2) { g.sunAz = side * r.range(0.5, 1.1); g.sunEl = r.range(0.42, 0.85); g.sun = [0.026, 0.7, 3, 22]; }
+    else { g.sunAz = side * r.range(0.25, 0.8); g.sunEl = r.range(0.3, 0.6); g.sun = [0.05, 0.9, 2, 20]; }
     g.sky = [r.chance(0.7) ? r.range(0.2, 0.75) : 0, r.range(0.7, 1.6), hour === 0 ? r.range(0.6, 1) : (hour === 1 ? r.range(0, 0.35) : 0), r.chance(0.55) ? r.range(0.03, 0.09) : 0];
     g.air = [r.range(0.0011, 0.0026), r.int(5, 8), -100, 0];
     // by night a little light from the open sky keeps upward faces readable

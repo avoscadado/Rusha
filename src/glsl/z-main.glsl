@@ -109,7 +109,9 @@ vec3 sky(vec3 rd, out float glow) {
 float hazeStep(float t) {
   float h = 1.0 - exp(-t * uAir.x);
   float n = max(uAir.y, 1.0), x = h * n;
-  return min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);
+  float stepped = min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);
+  // near things fade smoothly; only distance is cut into planes, or the first plane draws arcs on a near wall
+  return mix(h, stepped, smoothstep(0.18, 0.45, h));
 }
 
 vec3 calcN(vec3 p, float h, out float cav) {
@@ -208,7 +210,7 @@ void main() {
           st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
           if (sh < 0.02 || st > SHFAR) break;
         }
-        sh = smoothstep(0.25, 0.6, sh);
+        sh = smoothstep(0.4, 0.52, sh);                    // a printed shadow has one edge, not a gradient
       }
       // level ground takes even a very low sun; a wall the light only grazes is printed in shadow,
       // which keeps ragged grazing shadows off it

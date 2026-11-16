@@ -23,7 +23,7 @@ FORMS.cistern = {
     g.air = [2.6 / (13 * bay), r.int(5, 7), -100, 0];
     // the light comes down the holes, so the sun stands high
     g.sunAz = (r.chance(0.5) ? 1 : -1) * r.range(0.35, 1.1); g.sunEl = r.range(0.7, 1.0);
-    g.sun = [0.03, 0.8, 3, 16];
+    g.sun = [0.03, 0.8, 3, 22];
     g.sky = [0, 1, g.pal.hour === 0 ? 0.8 : 0, 0];
     g.fill = [-0.25 * Math.sign(g.sunAz), 0.35, -0.9, 1];
     g.interior = true; g.space = 0.95; g.timbres = ['organ', 'bowed', 'bell'];

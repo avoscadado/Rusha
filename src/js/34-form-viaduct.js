@@ -130,6 +130,7 @@ FORMS.viaduct = {
     if (hour === 2) g.sunEl = rl.range(0.36, 0.72);
     if (under === 'dry' && g.sunEl < 0.135) g.sunEl = rl.range(0.135, 0.19);   // enough to print shadows on level ground
     if (lay === 2) g.sunEl = Math.min(g.sunEl, 0.5);
+    g.sun[3] = 60;                                               // shadows are cut, not airbrushed
     g.fill = through ? [-sunSide, 0.3, -0.15, 1] : [0.1 * sunSide, 0.25, -1, 0.8];
     f.through = through;
     g.air = [lay === 2 ? rl.range(0.0022, 0.003) : rl.range(0.0013, 0.0021), rl.int(5, 8), -100, 0];

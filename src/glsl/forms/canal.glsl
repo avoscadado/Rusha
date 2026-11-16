@@ -22,6 +22,14 @@ float houseH(float cz, float side, vec4 r) {
   if ((odd && uTr[12] > 1.5 && uTr[12] < 2.5) || (!odd && r.z < uTr[15])) return 0.0;
   return floor(h / uTr[8]) * uTr[8] + 1.1;
 }
+float houseD(vec3 p, float cz, float side, float ax) {
+  vec4 r = house(cz, side);
+  float h = houseH(cz, side, r);
+  if (h <= 0.0) return 1e5;
+  float B = uTr[1];
+  vec3 q3 = vec3(uTr[0] + uTr[4] + uTr[14] * r.y - ax, p.y - h, abs(p.z - (cz + 0.5) * B) - B * 0.5);
+  return length(max(q3, 0.0)) + min(max(q3.x, max(q3.y, q3.z)), 0.0);
+}
 float bridgeD(vec3 p) {
   float Wc = uTr[0], hs = uTr[6];
   float zb = mod(p.z + uTr[5] * 0.5, uTr[5]) - uTr[5] * 0.5;
@@ -39,13 +47,10 @@ float map(vec3 p) {
   float roofs = (uTr[2] + uTr[3]) * 1.8 + 2.0;                // nothing stands higher than this
   if (p.y > roofs + 1.0) { gD = 1e3; return p.y - roofs; }    // a safe step; no surface is near, so no shadow or ink line
   float cz = floor(p.z / B), qz = p.z - (cz + 0.5) * B;
-  vec4 r = house(cz, side);
-  float h = houseH(cz, side, r);
-  if (h > 0.0) {
-    float face = Wc + Q + uTr[14] * r.y;
-    vec3 q3 = vec3(face - ax, p.y - h, abs(qz) - B * 0.5);
-    d = min(d, length(max(q3, 0.0)) + min(max(q3.x, max(q3.y, q3.z)), 0.0));
-  }
+  // this house and its nearer neighbour: a side wall stands on the line between two cells,
+  // and has to be there from both sides
+  d = min(d, houseD(p, cz, side, ax));
+  d = min(d, houseD(p, cz + (qz > 0.0 ? 1.0 : -1.0), side, ax));
   if (uTr[5] > 1.0) d = min(d, bridgeD(p));
   if (uTr[13] > 0.5) {                                       // mooring poles, which sink out of sight far away
     float away = length(p.xz - uCamP.xz);
@@ -74,7 +79,9 @@ Surf surf(vec3 p, vec3 n, float t) {
     if (p.y > 2.1) { s.lit = uInk[PAPER]; s.shade = mix(uInk[PAPER], uInk[SHADE], 0.5); }
     return s;
   }
-  float cz = floor(p.z / B), qz = p.z - (cz + 0.5) * B;
+  // which house this point belongs to: step a little into the wall before asking
+  float zin = p.z - n.z * 0.06;
+  float cz = floor(zin / B), qz = p.z - (cz + 0.5) * B;
   vec4 r = house(cz, side);
   float h = houseH(cz, side, r);
   bool front = abs(n.x) > 0.7 && ax > Wc + Q - 0.05 && p.y > 1.02;
