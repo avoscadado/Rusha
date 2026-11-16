@@ -27,7 +27,8 @@ float map(vec3 p) {
   float ax = abs(px), u = ax - W0;
   float i = clamp(floor(u / D), -1.0, M - 1.0);
   // the level underfoot and the one that rises ahead
-  d = qp(vec2(i * D - u, p.y - (base + (i + 1.0) * RH)));
+  // (the bed of the channel is one floor from side to side)
+  d = i < -0.5 ? p.y - base : qp(vec2(i * D - u, p.y - (base + (i + 1.0) * RH)));
   if (i < M - 1.0) d = min(d, qp(vec2((i + 1.0) * D - u, p.y - (base + (i + 2.0) * RH))));
   // the small flights that stand on this level, against the next
   if (i > -0.5 && i < M - 1.5) {
