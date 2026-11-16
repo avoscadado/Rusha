@@ -1,0 +1,36 @@
+// Drives the real page (not shot mode) and takes screenshots of the interface.
+//   node tools/ui.mjs outdir [--w 1280 --h 800] [--hash CODE] [--query "form=plain"]
+import { createRequire } from 'module';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+const { chromium } = createRequire(import.meta.url)('playwright');
+const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2), out = args[0];
+const opt = (k, d) => { const i = args.indexOf('--' + k); return i > 0 ? args[i + 1] : d; };
+const W = +opt('w', 1280), H = +opt('h', 800);
+fs.mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1, hasTouch: W < 600 });
+const log = [];
+page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { const t = m.text(); if (!/GPU stall|GL Driver Message/.test(t)) log.push(t.slice(0, 500)); } });
+page.on('pageerror', (e) => log.push('PAGEERROR ' + String(e).slice(0, 500)));
+const url = pathToFileURL(path.resolve(opt('page', path.join(root, 'index.html')))).href + '?' + opt('query', '') + (opt('hash', '') ? '#' + opt('hash', '') : '');
+await page.goto(url);
+await page.waitForSelector('#veil.peek', { timeout: 90000 });
+await page.waitForTimeout(2200);
+await page.screenshot({ path: path.join(out, '1-veil.png') });
+await page.click(opt('sound', '') ? '#go-sound' : '#go-quiet');
+await page.waitForTimeout(4500);
+await page.screenshot({ path: path.join(out, '2-plate.png') });
+await page.click('#b-more');
+await page.waitForTimeout(700);
+await page.screenshot({ path: path.join(out, '3-more.png') });
+await page.click('#b-more', { timeout: 4000 }).catch((e) => log.push('could not close More: ' + String(e).slice(0, 120)));
+await page.keyboard.press('b');
+await page.waitForTimeout(1500);
+await page.mouse.move(W / 2, H / 2);
+await page.screenshot({ path: path.join(out, '4-bleed.png') });
+const info = await page.evaluate(() => ({ info: window.__ks && window.__ks.info && window.__ks.info(), errors: window.__ks && window.__ks.errors, cap: document.getElementById('cap-name').textContent, no: document.getElementById('cap-no').textContent, hash: location.hash, audio: typeof AUDIO }));
+console.log(JSON.stringify({ ...info, log }));
+await browser.close();

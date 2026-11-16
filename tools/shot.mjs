@@ -14,6 +14,7 @@ const W = +opt('w', 640), H = +opt('h', 360), T = opt('t', '6').split(',').map(N
 const items = opt('sheet', null) ? opt('sheet', '').split(',') : [null];
 const look = opt('look', null);
 const cost = args.includes('--cost');
+const choose = opt('choose', null);
 const pageFile = path.resolve(opt('page', path.join(root, 'index.html')));
 
 const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
@@ -30,7 +31,7 @@ for (const item of items) {
   if (!ok) { failed = true; console.log(JSON.stringify({ item: q, ok: false, log })); await page.close(); continue; }
   let t0 = 0;
   for (const t of T) {
-    await page.evaluate(([a, b, lk]) => { if (lk) window.__ks.look(lk[0], lk[1]); window.__ks.advance(a - b); }, [t, t0, look ? look.split(',').map(Number) : null]);
+    await page.evaluate(([a, b, lk, ch]) => { if (lk) window.__ks.look(lk[0], lk[1]); if (ch !== null) window.__ks.choose(+ch); window.__ks.advance(a - b); }, [t, t0, look ? look.split(',').map(Number) : null, choose]);
     t0 = t;
     const info = await page.evaluate((c) => ({ ...window.__ks.info(), ...(c ? { px: window.__ks.pixels() } : {}), errors: window.__ks.errors }), cost);
     const buf = await page.screenshot({ clip: { x: 0, y: 0, width: W, height: H } });

@@ -20,13 +20,14 @@ const AU_EPS = 0.001;   // a portal tone below this is treated as silent
 
 // One synthesis recipe per timbre. att/dec/rel are seconds (dec and rel are time
 // constants), sus is the held level after the decay, perc marks struck timbres
-// that ring down instead of holding, norm brings a held tone to unit RMS and
-// hit scales the peak of a played note.
+// that ring down instead of holding, norm brings a held tone to about equal
+// loudness across timbres (measured, the buzzier ones set lower) and hit scales
+// the peak of a played note.
 const AU_TM = {
   glass:  { perc: true,  att: 0.006, dec: 0.9, sus: 0,    rel: 0.16, norm: 1.40, hit: 1.25 },
-  reed:   { perc: false, att: 0.09,  dec: 0.4, sus: 0.8,  rel: 0.11, norm: 1.16, hit: 0.80 },
-  bowed:  { perc: false, att: 0.32,  dec: 0.6, sus: 0.86, rel: 0.26, norm: 2.10, hit: 0.80 },
-  bell:   { perc: true,  att: 0.004, dec: 1.7, sus: 0,    rel: 0.24, norm: 1.40, hit: 1.15 },
+  reed:   { perc: false, att: 0.09,  dec: 0.4, sus: 0.8,  rel: 0.11, norm: 1.16, hit: 0.95 },
+  bowed:  { perc: false, att: 0.32,  dec: 0.6, sus: 0.86, rel: 0.26, norm: 2.10, hit: 0.95 },
+  bell:   { perc: true,  att: 0.004, dec: 1.7, sus: 0,    rel: 0.24, norm: 1.40, hit: 1.05 },
   breath: { perc: false, att: 0.16,  dec: 0.5, sus: 0.82, rel: 0.2,  norm: 53.0, hit: 1.00 },
   organ:  { perc: false, att: 0.2,   dec: 0.5, sus: 0.9,  rel: 0.18, norm: 1.10, hit: 0.90 },
 };
@@ -36,9 +37,12 @@ const AU_BEDN = { wind: 0.15, sea: 0.16, room: 0.2, rain: 0.085, still: 0.0025 }
 // Linear levels of each role, before the limiter. Nothing here is loud.
 const AU_LV = {
   note: 0.115, drone: 0.021, fifth: 0.011, swell: 0.03, portal: 0.07,
-  pivot: 0.075, peak: 0.105, pluck: 0.036, breath: 0.05,
+  pivot: 0.075, peak: 0.105, pluck: 0.042, breath: 0.05,
 };
-const AU_OUT = 0.95;    // output trim after the limiter (see au_build)
+// Output trim after the limiter. The limiter node applies a make-up gain of its
+// own (about 1.63 at these settings), so below the threshold the net gain is
+// about 1.55 and a signal driven hard into it tops out near 0.75.
+const AU_OUT = 0.95;
 
 let au_ctx = null;      // the BaseAudioContext in use
 let au_own = false;     // true when init created the context itself
@@ -48,6 +52,8 @@ let au_world = null;    // the world being scored
 let au_kin = null;      // kin portal tone
 let au_str = null;      // stranger portal tone
 let au_destKey = '';
+let au_gone = null;     // { w, until }: the world last faded out, while it can still be heard
+let au_pv = null;       // { h, until }: the pivot note of the last crossing
 const au_pw = [0, 0];   // wanted portal gains, kin and stranger, 0..1
 let au_on = true;
 let au_paused = false;
@@ -145,8 +151,7 @@ function au_build(ctx) {
   m.wet = ctx.createGain(); m.wet.gain.value = 1;
   m.hp = ctx.createBiquadFilter();               // no DC, no subsonics
   m.hp.type = 'highpass'; m.hp.frequency.value = 28; m.hp.Q.value = 0.5;
-  // Used as a limiter. Everything normally sits well under the threshold. The
-  // node adds its own make-up gain, which AU_OUT takes into account.
+  // Used as a limiter. Everything normally sits under the threshold.
   m.comp = ctx.createDynamicsCompressor();
   m.comp.threshold.value = -9; m.comp.knee.value = 5; m.comp.ratio.value = 20;
   m.comp.attack.value = 0.003; m.comp.release.value = 0.25;
@@ -528,10 +533,11 @@ function au_makeWorld(spec, t, o) {
   let mean = 0;
   for (const n of sp.motif) mean += au_pitch(sp, n.deg, n.oct);
   mean /= sp.motif.length;
-  w.shift = mean < 57 || mean > 77 ? 12 * Math.round((67 - mean) / 12) : 0;
+  w.shift = mean < 60 || mean > 79 ? 12 * Math.round((69 - mean) / 12) : 0;
 
-  // drone on the root, in a register small speakers can still carry
-  w.dm = au_fold(sp.root, 43);
+  // drone on the root, in a register small speakers can still carry; the two
+  // struck timbres hold as nearly pure tones, so theirs sits a little higher
+  w.dm = au_fold(sp.root, AU_TM[sp.timbre].perc ? 48 : 43);
   const lp = mix(3, 6.5, sp.bright);
   w.drone = au_hold(sp.timbre, w.dm, t, w.pitch, {
     bright: sp.bright, lp, breathe: [rs.range(11, 17), rs.range(19, 29)],
@@ -548,14 +554,29 @@ function au_makeWorld(spec, t, o) {
   au_bed(w, t, o.delay + 0.2);
   return w;
 }
-// Fade a world out and release everything it owns once it is silent.
+// Fade a world out (to about -35 dB after dur seconds) and release everything
+// it owns once it is silent.
 function au_fadeWorld(w, t, dur) {
   if (!w || w.dead) return;
+  au_clearOld(t);
   w.dead = true; w.q.length = 0;
-  for (const g of [w.fp.gain, w.fb.gain]) { g.setValueAtTime(1, t); g.linearRampToValueAtTime(0, t + dur); }
-  const T = t + dur + 0.05;
+  const T = au_fadeTo(w, t, dur / 4);
+  au_gone = { w, until: T };
+}
+function au_fadeTo(w, t, tau) {
+  for (const g of [w.fp.gain, w.fb.gain]) g.setTargetAtTime(0, t, tau);
+  const T = t + 8 * tau + 0.05;
   for (const G of w.groups) au_end(G, T);
   for (const v of w.live) au_end(v.G, T);
+  return T;
+}
+// Changes can come faster than fades finish (a jump straight after a crossing).
+// Whatever is still on its way out from the change before is hurried off, so
+// departures never stack up.
+function au_clearOld(t) {
+  if (au_gone && t < au_gone.until) au_fadeTo(au_gone.w, t, 0.04);
+  if (au_pv && t < au_pv.until) { au_pv.h.dip.gain.setTargetAtTime(0, t, 0.04); au_end(au_pv.h.G, t + 0.4); }
+  au_gone = null; au_pv = null;
 }
 function au_dropPortals(t, tau) {
   if (au_kin) au_kill(au_kin, t, tau);
@@ -662,22 +683,28 @@ function au_alloc(w, now) {
   if (now < w.pivotUntil) { b--; used++; }
   if (now < w.swellGone) { b--; used++; }
   if (now >= w.mel.from - AU_LEAD && now < w.mel.until) { b--; if (now >= w.mel.from) used++; }
+  let need = AU_MAXV - b;                      // lines spoken for, sounding or about to
+  const plucked = now - w.pulseAt < 0.25;      // a pluck already in the air keeps its line
+  if (plucked) { b--; used++; }
   for (let i = 0; i < 2; i++) {               // the nearer portal first
     const kin = (i === 0) === (au_pw[0] >= au_pw[1]), h = kin ? au_kin : au_str;
     if (!h) continue;
     const want = au_pw[kin ? 0 : 1], ok = want > AU_EPS && b > 0;
+    if (want > AU_EPS) need++;
     if (ok) { b--; used++; }
     au_set(h, ok ? want * AU_LV.portal * (kin ? 1 : 1.15) : 0, now, ok ? 0.12 : 0.1);
   }
   if (w.swell) {
     const ok = w.swellOn && b > 0;
+    if (w.swellOn) need++;
     if (ok) { b--; used++; }
     au_set(w.swell, ok ? AU_LV.swell : 0, now, ok ? 2 : 0.25);
   }
+  // a new pluck may sound only if a line is left after everything above has
+  // what it asked for, and the fifth (if it is in the way) has had time to go
   const fifthHeard = w.fifthOn || now - w.fifthOff < 0.5;
-  w.pulseOK = b > 1 || (b === 1 && !fifthHeard);
-  if (now - w.pulseSeen < 1.2) b--;
-  if (now - w.pulseAt < 0.2) used++;
+  w.pulseOK = need < AU_MAXV - 1 || (need === AU_MAXV - 1 && !fifthHeard);
+  if (!plucked && now - w.pulseSeen < 1.2) b--;
   if (w.fifth) {
     const ok = b > 0 && w.home && now >= w.drone.busy;
     if (ok) used++;
@@ -775,8 +802,9 @@ const AUDIO = {
     }
     if (au_own && au_ctx && typeof au_ctx.close === 'function') { try { au_ctx.close(); } catch (e) { /* closed */ } }
     au_ctx = null; au_m = null; au_world = null; au_kin = au_str = null; au_destKey = '';
+    au_gone = null; au_pv = null;
     au_pw[0] = au_pw[1] = 0;
-    au_own = false; au_rt = false; au_on = true; au_paused = false;
+    au_own = false; au_rt = false; au_paused = false;       // au_on is the listener's choice: keep it
     au_lastTick = -1; au_horizon = AU_LOOK; au_lastPulse = -9; au_pulseAlt = 0; au_lvl = 0;
     au_stat.live = 0; au_stat.voices = 0; au_stat.maxVoices = 0; au_stat.notes = 0; au_stat.pulses = 0; au_stat.first = null;
     AUDIO.ready = false;
@@ -796,12 +824,12 @@ const AUDIO = {
     }
   },
 
-  // Start a world from silence. Any previous world fades over 1.5 s.
+  // Start a world from silence. Any previous world fades out over 1.5 s.
   enter(spec) {
     if (!AUDIO.ready || !spec) return;
     const now = au_ctx.currentTime, old = au_world;
     au_dropPortals(now, 0.1);
-    if (old) au_fadeWorld(old, now, 1.5);
+    if (old) au_fadeWorld(old, now, 1.5); else au_clearOld(now);
     au_world = au_makeWorld(spec, now, { delay: 0.1, rise: 1.2, first: 1.5, oldUntil: old ? now + 1.5 : 0 });
   },
 
@@ -815,7 +843,7 @@ const AUDIO = {
     if (!old) { AUDIO.enter(spec); return; }
     const c = au_ctx, now = c.currentTime, sp = au_clean(spec);
     au_dropPortals(now, 0.07);
-    au_fadeWorld(old, now, 2.6);
+    au_fadeWorld(old, now, 3.2);
     const pm = au_fold(au_pivotPc(old.spec, sp), 58);
     const dry = c.createGain(), snd = c.createGain();
     dry.gain.value = 0.8; snd.gain.value = 0.45;
@@ -825,6 +853,7 @@ const AUDIO = {
     pv.g.gain.linearRampToValueAtTime(AU_LV.pivot, now + 0.7);
     pv.g.gain.setTargetAtTime(0, now + 2.5, 0.35);
     au_end(pv.G, now + 2.5 + 8 * 0.35);
+    au_pv = { h: pv, until: now + 2.5 + 8 * 0.35 };
     au_breath(now);
     au_world = au_makeWorld(spec, now, {
       delay: 0.5, rise: 0.9, first: 2.5 + (sp.heirloom ? 0.5 : 1.5),
@@ -850,7 +879,9 @@ const AUDIO = {
     if (kinSpec) {
       const ks = au_clean(kinSpec);
       const fifth = w.spec.mode.includes(7) && (ks.root - w.spec.root - 7) % 12 === 0;
-      km = au_fold(w.spec.root, 57) + (fifth ? 7 : 0);
+      km = au_fold(w.spec.root, 57);
+      if (km <= w.dm) km += 12;
+      if (fifth) km += 7;
       au_kin = au_hold(w.spec.timbre, km, now, w.pitch, { bright: w.spec.bright, lp: 6 });
     }
     if (strangerSpec) {
@@ -968,7 +999,10 @@ const AUDIO = {
 
   // For tests and demos only: counters, and when the first statement fell.
   stats() {
-    return { live: au_stat.live, voices: au_stat.voices, maxVoices: au_stat.maxVoices, notes: au_stat.notes, pulses: au_stat.pulses, first: au_stat.first };
+    return {
+      live: au_stat.live, voices: au_stat.voices, maxVoices: au_stat.maxVoices, notes: au_stat.notes,
+      pulses: au_stat.pulses, first: au_stat.first, state: au_ctx ? au_ctx.state : 'none',
+    };
   },
 
   // For tests and demos only: a valid, musically sensible spec from a seed.
@@ -985,7 +1019,7 @@ const AUDIO = {
     let count = r.int(4, 7), deg = r.pick([0, 0, 2, 4]);
     const motif = [];
     for (let i = 0; i < count; i++) {
-      motif.push({ deg, oct: root >= 46 ? 1 : 2, beats: r.weighted([[1, 5], [2, 1.5], [0.5, 1]]) });
+      motif.push({ deg, oct: root >= 50 ? 1 : 2, beats: r.weighted([[1, 5], [2, 1.5], [0.5, 1]]) });
       deg = clamp(deg + r.weighted([[1, 3], [-1, 3], [2, 2], [-2, 1.5], [3, 0.5]]), -2, mode.length + 2);
     }
     const last = motif[motif.length - 1];

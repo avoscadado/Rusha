@@ -4,17 +4,14 @@
 // For each demo spec a scripted 40 second session is rendered through an
 // OfflineAudioContext that is suspended every 0.1 s, so the engine's own
 // scheduler (AUDIO.tick) and the public calls run at the right moments.
+// A last step runs the engine on a realtime context for a few seconds, to cover
+// what an offline render cannot: the safety timer, suspend and resume.
 import { createRequire } from 'module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
-let chromium;
-try { ({ chromium } = require('playwright')); } catch (e) {
-  // playwright lives in a shared tools directory here, not in the repository
-  ({ chromium } = createRequire('/opt/node-tools/node_modules/')('playwright'));
-}
+const { chromium } = createRequire(import.meta.url)('playwright');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
@@ -64,9 +61,25 @@ async function renderSession(job) {
     if (at(t, 12.5)) AUDIO.event('peak');
     if (at(t, 13)) AUDIO.cross(a);
   };
+  // calls in no sensible order, to show that no sequence of them can click,
+  // pile up voices or throw
+  const rnd = rngFrom(job.seed);
+  const fuzz = (t) => {
+    if (at(t, 0)) AUDIO.enter(a);
+    const any = () => AUDIO.demoSpec(rnd.int(1, 1e6));
+    if (rnd.chance(0.5)) AUDIO.pulse(rnd());
+    if (rnd.chance(0.03)) AUDIO.event(rnd.chance(0.5) ? 'start' : 'peak');
+    if (rnd.chance(0.02)) AUDIO.cross(rnd.chance(0.5) ? kin : any());
+    if (rnd.chance(0.01)) AUDIO.enter(any());
+    if (rnd.chance(0.04)) AUDIO.setDestinations(rnd.chance(0.8) ? kin : null, rnd.chance(0.8) ? any() : null);
+    if (rnd.chance(0.03)) AUDIO.setPaused(rnd.chance(0.5));
+    if (rnd.chance(0.02)) AUDIO.setEnabled(rnd.chance(0.7));
+    AUDIO.portals(rnd(), rnd(), rnd(), rnd());
+    if (at(t, DUR - 3)) { AUDIO.setPaused(false); AUDIO.setEnabled(true); }
+  };
   const run = (t) => {
     try {
-      (job.script === 'controls' ? controls : full)(t);
+      (job.script === 'controls' ? controls : job.script === 'fuzz' ? fuzz : full)(t);
       AUDIO.tick();
       maxVoices = Math.max(maxVoices, AUDIO.stats().maxVoices);
       levelMax = Math.max(levelMax, AUDIO.level());
@@ -111,7 +124,7 @@ async function renderSession(job) {
     pulses: st.pulses, pulsesAsked, levelMax,
     w: {},
   };
-  if (job.script !== 'controls') {
+  if (job.script === 'full') {
     const gap0 = first ? first.until + 1.5 : 9;
     out.gapAt = gap0;
     out.w = { intro: rms(0, 1), motif: rms(2, 8), gap: rms(gap0, gap0 + 2), portal: rms(22, 30), portalEarly: rms(25, 26.5), portalLate: rms(28.5, 30), after: rms(31, 38), tail: rms(39, 40) };
@@ -132,13 +145,29 @@ for (let i = 0; i < 10; i++) {
   });
 }
 jobs.push({ name: 'controls', seed: 4242, dur: 20, script: 'controls', timbre: 'reed', bed: 'sea', kinBed: 'rain', strangerTimbre: 'bell', crossTo: 'kin' });
+jobs.push({ name: 'fuzz 1', seed: 77, dur: 60, script: 'fuzz', timbre: 'bell', bed: 'rain', kinBed: 'wind', strangerTimbre: 'breath', crossTo: 'kin' });
+jobs.push({ name: 'fuzz 2', seed: 78, dur: 60, script: 'fuzz', timbre: 'breath', bed: 'still', kinBed: 'sea', strangerTimbre: 'bowed', crossTo: 'kin' });
 
 const db = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
 const f1 = (x) => (Number.isFinite(x) ? x.toFixed(1) : '-inf').padStart(6);
 const AUDIBLE = -50;      // dBFS: a window with content
 const failures = [];
 
-const browser = await chromium.launch();
+// Static checks on the source: it is concatenated with the other files into one
+// classic script, so its top-level names must stay inside its own prefix.
+{
+  const src = read('src/js/50-audio.js');
+  if (!/^\s*\/\//.test(src)) failures.push('source: the file must start with a comment header');
+  if (/^\s*['"]use strict['"]/m.test(src)) failures.push("source: 'use strict' is set elsewhere");
+  if (/\b(import|export)\s|\bfetch\s*\(|XMLHttpRequest|importScripts/.test(src.replace(/\/\/.*$/gm, ''))) failures.push('source: module syntax or a network call');
+  const names = [...src.matchAll(/^(?:const|let|var|function\*?|class)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]);
+  const stray = names.filter((n) => n !== 'AUDIO' && !/^(au_|AU_)/.test(n));
+  if (stray.length) failures.push('source: top-level names outside the au_ / AU_ prefix: ' + stray.join(', '));
+  if (names.filter((n) => n === 'AUDIO').length !== 1) failures.push('source: AUDIO must be declared exactly once');
+  try { new Function(read('src/js/00-util.js') + '\n' + src); } catch (e) { failures.push('source: does not parse: ' + e.message); }
+}
+
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 try {
   const page = await browser.newPage();
   const pageErrors = [];
@@ -147,8 +176,6 @@ try {
   await page.addScriptTag({ content: read('src/js/00-util.js') });
   await page.addScriptTag({ content: read('src/js/50-audio.js') });
 
-  // the engine may add exactly one global besides its au_ / AU_ names; this
-  // is checked by loading it and looking at what the API exposes
   const api = await page.evaluate(() => ({
     keys: Object.keys(AUDIO).sort(),
     ready: AUDIO.ready,
@@ -170,8 +197,9 @@ try {
   if (api.demoOk) failures.push('demoSpec produced an invalid spec: ' + api.demoOk);
   if (api.idle !== 0) failures.push('calls before init are not harmless: ' + api.idle);
 
-  console.log('all levels in dBFS; diff is the largest step between neighbouring samples\n');
-  console.log('spec          root bpm n |    rms   peak   diff      dc | intro  motif    gap portal  after | voc live notes pulses');
+  console.log('levels in dBFS. diff: largest step between neighbouring samples. max: most pitched lines at once.');
+console.log('live: voices still connected at the end. pulses: played/asked.\n');
+  console.log('spec          root bpm n |    rms   peak   diff      dc | intro  motif    gap portal  after | max live notes pulses');
   for (const job of jobs) {
     const r = await page.evaluate(renderSession, job);
     const fail = (msg) => failures.push(`${job.name}: ${msg}`);
@@ -181,8 +209,8 @@ try {
     console.log(
       `${job.name.padEnd(13)} ${String(r.spec.root).padStart(4)} ${String(r.spec.tempo).padStart(3)} ${r.spec.notes} | ` +
       `${f1(db(r.rms))} ${r.peak.toFixed(3).padStart(6)} ${r.diff.toFixed(3).padStart(6)} ${r.dc.toExponential(1).padStart(7)} | ` +
-      (job.script === 'controls' ? '     -      -      -      -      - | ' : `${f1(db(w.intro))} ${f1(db(w.motif))} ${f1(db(w.gap))} ${f1(db(w.portal))} ${f1(db(w.after))} | `) +
-      `${String(r.maxVoices).padStart(3)} ${String(r.live).padStart(4)} ${String(r.notes).padStart(5)} ${String(r.pulses).padStart(3)}/${r.pulsesAsked}`,
+      (job.script !== 'full' ? '     -      -      -      -      - | ' : `${f1(db(w.intro))} ${f1(db(w.motif))} ${f1(db(w.gap))} ${f1(db(w.portal))} ${f1(db(w.after))} | `) +
+      `${String(r.maxVoices).padStart(3)} ${String(r.live).padStart(4)} ${String(r.notes).padStart(5)} ${String(r.pulses).padStart(3)}` + (r.pulsesAsked ? `/${r.pulsesAsked}` : ''),
     );
     if (r.profile) console.log('   per second: ' + r.profile.map((x) => db(x).toFixed(0)).join(' '));
 
@@ -194,7 +222,7 @@ try {
     if (!(r.diff < 0.25)) fail(`click: step of ${r.diff.toFixed(3)} at ${r.diffAt.toFixed(3)} s`);
     if (r.maxVoices > 3) fail(`${r.maxVoices} pitched lines at once`);
     if (r.live > 24) fail(`${r.live} voices still connected at the end (leak)`);
-    if (job.script === 'controls') continue;
+    if (job.script !== 'full') continue;
     if (!r.first) { fail('the motif was never stated'); continue; }
     if (Math.abs(r.first.from - 1.5) > 0.11) fail(`motif stated at ${r.first.from.toFixed(2)} s, expected 1.5 s`);
     const due = 30 + (r.heirloom ? 3 : 4);     // the returning tune comes a second sooner
@@ -208,6 +236,45 @@ try {
     if (!(w.portalLate > w.portalEarly)) fail(`portal tones do not grow with nearness (${f1(db(w.portalEarly))} -> ${f1(db(w.portalLate))})`);
     if (!(r.pulses > 0 && r.pulses < r.pulsesAsked)) fail(`pulse rate limit: ${r.pulses} of ${r.pulsesAsked} played`);
     if (!(r.levelMax > 0 && r.levelMax <= 1)) fail(`level() out of range: ${r.levelMax}`);
+  }
+
+  // realtime: no rendering to inspect, only that the live path works
+  const rt = await page.evaluate(async () => {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const out = { ok: false };
+    try {
+      AUDIO.reset();
+      out.init = AUDIO.init();
+      if (!out.init) return out;
+      out.again = AUDIO.init();                       // idempotent
+      AUDIO.setEnabled(true);
+      AUDIO.enter(AUDIO.demoSpec(31));
+      // nothing calls tick here: the engine's own timer must carry the score
+      let lvl = 0;
+      for (let i = 0; i < 30; i++) { await wait(100); lvl = Math.max(lvl, AUDIO.level()); }
+      out.level = lvl; out.notes = AUDIO.stats().notes;
+      AUDIO.setEnabled(false);
+      await wait(1900);
+      out.suspended = AUDIO.stats().state;
+      AUDIO.setEnabled(true);
+      await wait(400);
+      out.resumed = AUDIO.stats().state;
+      AUDIO.reset();
+      out.readyAfterReset = AUDIO.ready;
+      out.ok = true;
+    } catch (e) { out.error = String(e && e.stack || e); }
+    return out;
+  });
+  console.log(`\nrealtime: init ${rt.init}, notes after 3 s ${rt.notes}, level ${rt.level && rt.level.toFixed(2)}, after mute "${rt.suspended}", after unmute "${rt.resumed}"`);
+  if (rt.error) failures.push('realtime: ' + rt.error);
+  else if (!rt.init) console.log('realtime: no AudioContext in this browser, skipped');
+  else {
+    if (rt.again !== true) failures.push('realtime: a second init did not return true');
+    if (!(rt.notes >= 1)) failures.push('realtime: the timer did not schedule the motif without tick calls');
+    if (!(rt.level > 0)) failures.push('realtime: level() stayed at 0');
+    if (rt.suspended !== 'suspended') failures.push(`realtime: context is "${rt.suspended}" 1.9 s after setEnabled(false)`);
+    if (rt.resumed !== 'running') failures.push(`realtime: context is "${rt.resumed}" after setEnabled(true)`);
+    if (rt.readyAfterReset !== false) failures.push('realtime: ready is still true after reset');
   }
   for (const e of pageErrors) failures.push('page error: ' + e);
 } finally {

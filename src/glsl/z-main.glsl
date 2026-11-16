@@ -173,7 +173,7 @@ void main() {
       float d = map(ro + rd * t);                          // map call site 1 of 3
       cost += 1.0;
       if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; break; }
-      if (gD > pd && pd < 1.6 * uPix * t) edge = 1.0;      // grazed something: an ink line
+      if (gD > pd && pd < 1.2 * uPix * t) edge = max(edge, exp(-t * uAir.x * 7.0));   // grazed something near: an ink line
       pd = gD;
       t += d * STEPK * (i == 0 ? jit : 1.0);
       if (t > tMax) { spent = false; break; }
@@ -199,7 +199,7 @@ void main() {
           if (i >= nShadow) break;
           float d = map(sp + uSunDir * st);                // map call site 3 of 3
           cost += 1.0;
-          sh = min(sh, uSun.w * d / st);
+          sh = min(sh, uSun.w * gD / st);                   // real surfaces only: a cell wall casts no shadow
           st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
           if (sh < 0.02 || st > SHFAR) break;
         }
@@ -224,7 +224,7 @@ void main() {
         }
       }
       g = s.glow;
-      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7 * exp(-t * uAir.x * 2.0));
+      c = mix(c, uInk[DEEP], 0.7 * edge);
       if (b == 0) tHitP = t;
       // ground mist, then the stepped planes of haze
       float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);
@@ -243,7 +243,7 @@ void main() {
       float rim = smoothstep(1.0 - lw, 1.0 - 0.5 * lw, rr);
       c = mix(through, uInk[PAPER], rim);
       g = rim * 0.5;
-      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7);
+      c = mix(c, uInk[DEEP], 0.7 * edge);
       if (b == 0) tFirst = tMax;
     } else if (stop == 1) {
       vec3 pw = ro + rd * tMax;

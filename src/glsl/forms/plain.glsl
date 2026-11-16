@@ -52,7 +52,8 @@ float map(vec3 p) {
   if (kind < 0.5) return d;
   float S = uTr[1], H = uTr[2], W = uTr[10];
   // far things sink into the ground before they get thinner than a pixel
-  float lod = 1.0 - smoothstep(9.0 * S, 13.0 * S, length(p.xz - uCamP.xz));
+  float away = length(p.xz - uCamP.xz);
+  float lod = 1.0 - smoothstep(9.0 * S, 13.0 * S, away);
   if (lod < 0.01) return d;
   H *= lod;
   float top = H * 2.5 + 2.0;
@@ -64,7 +65,8 @@ float map(vec3 p) {
   bool odd = isOdd(c);
   if (r.x < uTr[4] || odd) {
     q.xz -= (r.yz - 0.5) * S * 0.42 * uTr[3] * (odd ? 0.0 : 1.0);
-    d = min(d, thing(q, kind, H, W, r, odd));
+    // far things are drawn a little fatter, so they stay whole instead of breaking into specks
+    d = min(d, thing(q, kind, H, W, r, odd) - min(0.8 * uPix * away, 0.8 * W));
   }
   gD = d;
   return min(d, ex);

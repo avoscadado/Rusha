@@ -16,7 +16,7 @@ const ENG = {
   look: { yaw: 0, pitch: 0, tyaw: 0, tpitch: 0, idle: 9 },
   camOff: [0, 0], roll: 0,
   fade: 0, fadeInk: [0, 0, 0],
-  clock: 0, frame: 0, paused: false, gentle: false,
+  clock: 0, frame: 0, paused: false, gentle: false, started: false, linger: false, hurry: false,
   journey: { seed: 1, step: 0, kinRun: 0, plates: [] },
   on: {},                  // callbacks: arrive(world), doors(open), choose(k), cross(world), fail(msg)
   stats: { fps: 0, ms: 0, compileMs: 0, px: 0, cost: 0 },
@@ -68,9 +68,9 @@ const ENG = {
   resize(force) {
     const c = this.canvas;
     let cw, ch;
-    if (this.fixed) { cw = c.width; ch = c.height; }
+    if (this.fixed && !this.fixedLayout) { cw = c.width; ch = c.height; }
     else {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = this.fixed ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       const box = c.getBoundingClientRect();
       cw = Math.max(2, Math.round(box.width * dpr)); ch = Math.max(2, Math.round(box.height * dpr));
       const cap = 3.7e6 / (cw * ch);
@@ -102,7 +102,8 @@ const ENG = {
     this.cur.z = 0; this.cur.ta = 0;
     this.cand = [null, null]; this.doors = null;
     this.camOff = [0, 0]; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
-    this.fade = 0; this.arrived = false;
+    this.fade = 0; this.arrived = false; this.hurry = false;
+    this.arrivalKind = opts.kind || 'first';
     if (!opts.quiet) { this.journey.step = opts.step || 0; }
     return this.cur;
   },
@@ -140,12 +141,13 @@ const ENG = {
     }
     if (st === 'failed') { this.failWorld(w); return; }
     if (st !== 'ready') return;
-    if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w); }
+    if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w, this.arrivalKind || 'first'); }
     if (this.paused) dt = 0;
     this.clock += dt; this.frame++;
     this.fade = Math.min(1, this.fade + dt / 2.2);
     const g = w.g;
     w.t += dt; w.ta += dt;
+    if (!this.started) w.ta = Math.min(w.ta, 0.5);          // behind the veil the visit has not begun
     for (const c of this.cand) if (c) c.t += dt;
 
     // candidates: made a few seconds in, opened when both shaders are ready
@@ -208,7 +210,7 @@ const ENG = {
     }
     if (this.look.idle < 2.2 && left > g.speed * 2.5) {
       const pick = D.gaze[0] > 0.6 && D.gaze[0] > D.gaze[1] ? 0 : D.gaze[1] > 0.6 ? 1 : -1;
-      if (pick >= 0 && pick !== D.chosen) { D.chosen = pick; D.picked = true; if (this.on.choose) this.on.choose(pick); }
+      if (pick >= 0) this.choose(pick);
     }
     // the line of flight bends to pass through the centre of the chosen portal
     const o = D.chosen === 0 ? g.door.kin : g.door.stranger;
@@ -232,7 +234,11 @@ const ENG = {
     this.cur = next; this.cand = [null, null]; this.doors = null; this.hurry = false;
     void E;
     if (this.on.cross) this.on.cross(next, k);
-    if (this.on.arrive) this.on.arrive(next);
+  },
+  choose(k) {
+    const D = this.doors;
+    if (!D || !this.cand[k] || D.z - this.cur.z < this.cur.g.speed * 2.5) return;
+    if (D.chosen !== k) { D.chosen = k; D.picked = true; if (this.on.choose) this.on.choose(k); }
   },
 
   failWorld(w) {
@@ -277,9 +283,9 @@ const ENG = {
     f = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
     // bank a little into the bends of the line
     const bend = (WORLD.pathAt(g, z + 30)[0] - 2 * WORLD.pathAt(g, z + 15)[0] + p[0]) / 225;
-    const roll = this.gentle ? 0 : clamp(-bend * g.speed * g.speed * 0.02, -0.12, 0.12);
-    let r = V.norm(V.cross(f, [0, 1, 0]));
-    let u = V.cross(r, f);
+    const roll = this.gentle ? 0 : clamp(bend * g.speed * g.speed * 0.02, -0.12, 0.12);
+    let r = V.norm(V.cross([0, 1, 0], f));                 // +x is to the right of the picture
+    let u = V.cross(f, r);
     const cr = Math.cos(roll), sr = Math.sin(roll);
     const r2 = V.add(V.mul(r, cr), V.mul(u, sr)), u2 = V.sub(V.mul(u, cr), V.mul(r, sr));
     const aspect = this.rw / this.rh;
@@ -387,7 +393,7 @@ const ENG = {
     // 4. to the screen
     GLX.use(this.post.fin);
     GLX.tex('uSrc', 0, this.tg.scene.tex); GLX.tex('uGlow', 1, ga.tex); GLX.tex('uNoise', 2, this.noise);
-    GLX.v2('uOut', this.cw, this.ch);
+    GLX.v2('uOut', this.cw, this.ch); GLX.v2('uSrcSize', this.rw, this.rh);
     GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, this.debug);
     GLX.v3('uFadeInk', w.g.pal.paper);
     GLX.draw(null, this.cw, this.ch);

@@ -14,15 +14,54 @@
 <body>
 <!-- GENERATED FILE. Edit the sources in src/ and run: node build.mjs -->
 <main id="sheet">
-  <div id="plate"><canvas id="view" aria-label="The current place"></canvas></div>
-  <footer id="caption" aria-live="polite">
-    <div id="cap-no"></div>
-    <h1 id="cap-name"></h1>
-    <p id="cap-line"></p>
-    <p id="cap-from"></p>
+  <div id="plate">
+    <canvas id="view" aria-label="The place you are flying through"></canvas>
+    <div id="toast" role="status" aria-live="polite"></div>
+  </div>
+  <footer id="foot">
+    <section id="caption" aria-live="polite">
+      <div id="cap-no"></div>
+      <h1 id="cap-name"></h1>
+      <p id="cap-line"></p>
+      <p id="cap-hint"></p>
+    </section>
+    <nav id="keys" aria-label="Controls">
+      <button id="b-sound" aria-pressed="false" title="Sound (S)">Sound</button>
+      <button id="b-pause" aria-pressed="false" title="Pause (space)">Pause</button>
+      <button id="b-next" title="Bring the doors on (N)">Onward</button>
+      <button id="b-more" aria-expanded="false" aria-controls="more" title="More (M)">More</button>
+      <aside id="more" hidden aria-label="More">
+        <h2>The way here</h2>
+        <div id="line" role="list"></div>
+        <h2>This place</h2>
+        <div class="row">
+          <button id="b-copy" title="Copy a link to this place (C)">Copy link</button>
+          <button id="b-photo" title="Save this plate as a picture (P)">Save plate</button>
+          <button id="b-stay" aria-pressed="false" title="Stay here: the doors will not open (L)">Stay</button>
+        </div>
+        <h2>The sheet</h2>
+        <div class="row">
+          <button id="b-bleed" aria-pressed="false" title="Fill the window with the picture (B)">Full bleed</button>
+          <button id="b-gentle" aria-pressed="false" title="A level, unhurried camera (G)">Gentle</button>
+          <button id="b-full" title="Fullscreen (F)">Fullscreen</button>
+        </div>
+        <p id="about">Every place ends in two doors. The low one opens on the same place, changed: at night, flooded, a long time later. The high one opens on somewhere else. Look at a door to choose it, or do nothing and be carried. Nothing here is stored anywhere but in this browser.</p>
+        <p id="stat"></p>
+      </aside>
+    </nav>
   </footer>
 </main>
-<div id="veil"><div id="veil-in"><div id="veil-title">Kin and Stranger</div><div id="veil-sub">mixing the inks</div></div></div>
+<div id="veil">
+  <div id="veil-in">
+    <div id="veil-title">Kin and Stranger</div>
+    <p id="veil-sub">mixing the inks</p>
+    <div id="veil-go" hidden>
+      <button id="go-sound">Enter with sound</button>
+      <button id="go-quiet">Enter quietly</button>
+    </div>
+    <p id="veil-note" hidden>A flight through places that were not here a moment ago. Each one ends in two doors.</p>
+  </div>
+</div>
 <script>
 (function () {
 /*GLSL*/
