@@ -13,7 +13,8 @@
 //   uTr[10] layout: 0 one viaduct, 1 an avenue of two, 2 a nave under one deck
 //   uTr[11] the floor     uTr[12] exception: 0 none, 1 a fallen arch, 2 a painted pier, 3 a blind arch
 //   uTr[13] its bay (signed by its side in an avenue)   uTr[14] share of spans that are down (much later)
-//   uTr[15] bits: 1 lamps, 2 lamps already lit, 4 pilasters, 8 openings over the piers, 16 the event lights the lamps
+//   uTr[15] bits: 1 lamps, 2 lamps already lit, 4 pilasters, 8 openings over the piers, 16 the event lights the lamps,
+//           32 a shallow dry bed runs along under the arches, for the mist to fill
 // ---------------------------------------------------------------------------
 #define FAR 5200.0
 #define STEPK 0.9
@@ -47,6 +48,10 @@ bool vDown(float bay, float sid) { return cell1(ivec2(int(bay), 9 + int(sid))) <
 bool vOdd(float bay, float sid) { return abs(bay - abs(uTr[13])) < 0.5 && (uTr[10] < 0.5 || sid * uTr[13] > 0.0); }
 
 float shafts(vec3 ro, vec3 rd, float t, float jit) { return 0.0; }
+
+// The dry bed: two planes that fall 2.4 m to the line of the piers from banks 53 m either side.
+#define BED_D 2.4
+#define BED_S 0.045
 
 // Ruled lines every `pitch` metres, never thinner than the print can hold: they
 // widen and pale with distance, and are gone before they could shimmer.
@@ -151,20 +156,29 @@ float map(vec3 p) {
     d = min(d, max(max(ax - w, abs(v) - a0 - 0.1), q.y - yb - T + 0.9));
   if (uTr[12] > 0.5 && uTr[12] < 1.5 && (uTr[10] < 0.5 || sid * uTr[13] >= 0.0)) {
     // the span lies where it fell: one length of wall, tilted, half under
-    vec3 b = vec3(q.x, q.y - max(fy, -2.5) - 0.2 * a0, q.z - (abs(uTr[13]) + 0.5) * S);
+    vec3 b = vec3(q.x, q.y - max(fy, -2.5) + vBit(32.0) * 2.0 - 0.2 * a0, q.z - (abs(uTr[13]) + 0.5) * S);
     float bb = sdBox(b, vec3(w, 0.2 * a0 + 2.6, 0.72 * a0 + 1.5));
     if (bb > 1.0) d = min(d, bb);
     else { b.yz = rot(0.21) * b.yz; d = min(d, sdBox(b, vec3(0.95 * w, 2.1, 0.68 * a0))); }
   }
   // far off, the whole line goes down into the horizon
-  d = max(d, (q.y - mix(Hc + 12.0, min(fy, uSea.y) - 1.0, smoothstep(0.55 * FAR, 0.97 * FAR, dc))) * 0.97);
+  d = max(d, (q.y - mix(Hc + 12.0, min(fy, uSea.y) - 4.0, smoothstep(0.55 * FAR, 0.97 * FAR, dc))) * 0.97);
 
-  float fl = p.y - fy;
-  gD = gRd.y > 1e-4 ? d : min(d, fl);              // a ray that is going up has nothing to do with the floor
-  // Along a ray, some distances are known exactly: to the floor when the ray goes down,
+  // the floor: level ground, with or without the bed
+  bool bed = vBit(32.0) > 0.5;
+  float flA = p.y - fy, fl = flA;
+  float n1 = flA + BED_D - BED_S * q.x, n2 = flA + BED_D + BED_S * q.x;      // heights over the two planes of the bed
+  if (bed) fl = max(flA, min(n1, n2) * 0.999);
+  gD = gRd.y > 0.06 ? d : min(d, fl);              // a ray that is going up has nothing to do with the floor
+  // Along a ray, some distances are known exactly: to the floor, plane by plane,
   // and to the slab of air the viaduct stands in when the ray is outside it.
   if (dot(gRd, gRd) > 0.5) {
-    if (gRd.y > 1e-4) fl = 1e5; else if (gRd.y < -1e-4) fl = fl / -gRd.y;
+    fl = flA <= 0.0 ? 0.0 : (gRd.y < -1e-4 ? flA / -gRd.y : 1e5);
+    if (bed) {
+      float rx = gRd.x * sgn, e1 = BED_S * rx - gRd.y, e2 = -BED_S * rx - gRd.y;
+      float t1 = n1 <= 0.0 ? 0.0 : (e1 > 1e-5 ? n1 / e1 : 1e5), t2 = n2 <= 0.0 ? 0.0 : (e2 > 1e-5 ? n2 / e2 : 1e5);
+      fl = max(fl, min(t1, t2));
+    }
     float o = ax - max(w + foot, wd + 0.6) - 0.15;
     if (o > 0.0 && (q.x > 0.0 || !nave)) {
       float mv = gRd.x * sgn * sign(q.x);          // > 0: going away from the viaduct's plane
@@ -182,7 +196,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   float S = uTr[0], Hm = uTr[1], T = uTr[2], pw = uTr[4], w = uTr[5], k = uTr[6], hs = uTr[7], fy = uTr[11];
   float N = mod(uTr[3], 10.0), nUp = floor(uTr[3] * 0.1 + 0.01);
   Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.4), 0.0, 0.4);
-  if (p.y - fy < 0.05 + 0.004 * t && n.y > 0.8) {  // the ground: level and plain
+  if (p.y - fy - vBit(32.0) * min(0.0, BED_S * abs(q.x) - BED_D) < 0.05 + 0.004 * t && n.y > 0.8) {  // the ground: level and plain
     s.lit = uInk[LIT]; s.shade = uInk[SHADE]; s.line = 0.0;
     float pave = abs(q.x) - w - 5.5 - vBit(4.0) * 0.5 * w;                       // a strip of paving the piers stand on
     if (pave < 0.0) {

@@ -75,7 +75,7 @@ FORMS.viaduct = {
     const ymin = P.y0 - Math.abs(P.ay);
 
     // ---- what lies under it, and what happens ----
-    let floor = 0, riseTo = 0;
+    let floor = 0, riseTo = 0, bed = 0;
     g.floodTo = 1.2;
     const f = g.facts = { H: Hall, span: Math.round(2 * a), bay, N, nUp, tiers: N + (nUp ? 1 : 0), lay, under, view, pointed: k > 1, dusk: hour === 1 };
     const pick = (opts) => re.weighted(opts.concat([['sunset', hour === 1 ? 3 : 0]]));
@@ -89,10 +89,8 @@ FORMS.viaduct = {
       } else if (ev === 'mistdown') { g.ev = { id: 1, type: 'tide', t0: 9, dur: 34, amount: -re.range(9, 22) }; f.mist = 'down'; }
     } else if (under === 'dry') {
       ev = pick([['none', 3.5], ['mistin', hour === 1 ? 6 : 2.6], ['fog', 1.4], ['lights', 2]]);
-      if (ev === 'mistin') {                                     // a sea of mist comes up through the ground and gives it a river
-        riseTo = Math.min(ymin - 4.5, re.range(2.5, 6));
-        if (riseTo < 1.5) { ev = 'none'; riseTo = 0; } else { g.sea = [3, -1.2, 0, 0]; g.ev = { id: 1, type: 'tide', t0: 12, dur: 26, amount: riseTo + 1.2 }; f.mist = 'in'; }
-      }
+      // a dry bed runs along under the arches, 2.4 m deep at the piers; mist comes up in it and gives the viaduct a river
+      if (ev === 'mistin') { bed = 32; g.sea = [3, -2.6, 0, 0]; g.ev = { id: 1, type: 'tide', t0: 10, dur: 28, amount: 2.3 }; f.mist = 'in'; }
     } else {
       g.sea = [under === 'mirror' ? 2 : 1, 0, under === 'mirror' ? re.range(0.3, 0.75) : re.range(0.6, 1), 0];
       floor = -1.6;
@@ -141,7 +139,7 @@ FORMS.viaduct = {
     if (lay !== 0) g.sky[3] = 0;                                 // no far country in the notch between two rows
 
     g.tr.set([bay, Hm, T, N + 10 * nUp, pw, w, k, hs, hT, lay === 0 ? side * X0 : X0, lay, floor,
-      ex, ex ? oz * (lay === 0 ? 1 : exSide) : 0, 0, (lamps ? 1 : 0) + (lamps && hour === 0 && g.ev.type !== 'lights' ? 2 : 0) + (pil ? 4 : 0) + (open ? 8 : 0) + (g.ev.type === 'lights' ? 16 : 0)]);
+      ex, ex ? oz * (lay === 0 ? 1 : exSide) : 0, 0, (lamps ? 1 : 0) + (lamps && hour === 0 && g.ev.type !== 'lights' ? 2 : 0) + (pil ? 4 : 0) + (open ? 8 : 0) + (g.ev.type === 'lights' ? 16 : 0) + bed]);
     g.pulse = bay;
     g.timbres = ['bowed', 'bell', 'organ'];
     g.space = lay === 2 ? 0.9 : 0.75;
@@ -200,11 +198,11 @@ FORMS.viaduct = {
   later(g, r) {
     g.tr[14] = r.range(0.3, 0.46);
     if (g.tr[12] === 1) g.tr[12] = 0;
-    g.tr[15] = g.tr[15] & 12;                                    // keep the pilasters and the openings, lose the lamps
+    g.tr[15] = g.tr[15] & 44;                                    // keep the pilasters, the openings and the bed; lose the lamps
     if (g.ev.type === 'lights') g.ev.type = 'none';
   },
   // after dark the parapet lamps, where there are any, are already on
   night(g) {
-    if (g.tr[15] & 1) { g.tr[15] = (g.tr[15] & 13) | 2; if (g.ev.type === 'lights') g.ev.type = 'none'; }
+    if (g.tr[15] & 1) { g.tr[15] = (g.tr[15] & 45) | 2; if (g.ev.type === 'lights') g.ev.type = 'none'; }
   },
 };
