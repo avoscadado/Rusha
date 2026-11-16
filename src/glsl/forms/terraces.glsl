@@ -14,13 +14,13 @@
 //   uTr[7] how much the hills differ in height: H * (1 - uTr[7] + uTr[7] * noise)
 //   uTr[8] how many shelves hold water 0..1              uTr[9] huts: share of cells with one, 0 none
 //   uTr[10] 1 / sqrt(1 + G * G), G the steepest slope    uTr[11] bound on the curvature of r
-//   uTr[12] steepest sideways slope of the flight line   uTr[13] slump 0..1: every second shelf has sunk this far
-//   uTr[14] valley floor: 0 bare, 1 a road, 2 fields     uTr[15] size of a hut cell
+//   uTr[12] spurs: 2 pi / their spacing along the valley uTr[13] slump 0..1: every second shelf has sunk this far
+//   uTr[14] valley floor: 0 bare, 1 a road               uTr[15] spurs: how far the coves between them go back
 // ---------------------------------------------------------------------------
 #define FAR 1900.0
 #define STEPK 0.9
 #define SHFAR 340.0
-#define LODPX 5.0
+#define LODPX 7.0
 
 float gU;            // sideways distance from the flight line at the last rawG()
 
@@ -37,8 +37,10 @@ vec3 rawG(vec2 x) {
   float a = cell1(c), b = cell1(c + ivec2(1, 0)), d = cell1(c + ivec2(0, 1)), e = cell1(c + ivec2(1, 1));
   float n = mix(mix(a, b, w.x), mix(d, e, w.x), w.y);
   vec2 dn = uTr[5] * vec2(dw.x * mix(b - a, e - d, w.y), dw.y * mix(d - a, e - b, w.x));
-  float s = (abs(u) - uTr[2] - uTr[3] * (1.0 - n)) / uTr[4];
-  vec2 ds = ((u < 0.0 ? -1.0 : 1.0) * vec2(1.0, uz) + uTr[3] * dn) / uTr[4];
+  float sg = u < 0.0 ? -1.0 : 1.0;
+  float ph = x.y * uTr[12] + sg * 1.9;                 // coves scalloped into each side, out of step with each other
+  float s = (abs(u) - uTr[2] - uTr[3] * (1.0 - n) - uTr[15] * (0.5 + 0.5 * sin(ph))) / uTr[4];
+  vec2 ds = (sg * vec2(1.0, uz) + uTr[3] * dn - vec2(0.0, 0.5 * uTr[15] * uTr[12] * cos(ph))) / uTr[4];
   float sc = clamp(s, 0.0, 1.0), kb = 1.0 / (1.0 + uTr[6] * sc);
   float bs = sc * (1.0 + uTr[6]) * kb;                 // the profile: an S, leaning toward the valley
   float P = bs * bs * (3.0 - 2.0 * bs), dP = 6.0 * bs * (1.0 - bs) * (1.0 + uTr[6]) * kb * kb;
@@ -105,11 +107,17 @@ float map(vec3 p) {
     float yr = gRd.y < 0.0 ? 0.6 * p.y : p.y;
     float bn = 0.5 - sin(asin(1.0 - 2.0 * min(yr / Hm, 1.0)) / 3.0);
     float need = yr >= Hm ? 1e5 : uTr[2] + uTr[4] * bn / (1.0 + uTr[6] * (1.0 - bn));
-    float se = (need - abs(u)) / max(abs(gRd.x) + uTr[12] * abs(gRd.z), 1e-4);
+    float se = (need - abs(u)) / max(abs(gRd.x) + abs(uPathA.x * uPathA.y * gRd.z), 1e-4);
     if (gRd.y < 0.0) se = min(se, 0.4 * p.y / -gRd.y);
     d = max(d, se);
   }
   return min(d, sp);
+}
+
+// the tone z-main will print for a face whose normal makes this cosine with the sun, if nothing shades it
+float toneOf(float ndl) {
+  float nb = max(uSun.z, 1.0), x = smoothstep(-0.02, 0.5, ndl) * step(-0.02, uSunDir.y) * nb;
+  return min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);
 }
 
 Surf surf(vec3 p, vec3 n, float t) {
@@ -118,17 +126,17 @@ Surf surf(vec3 p, vec3 n, float t) {
   float u = gU;
   vec2 sh = shelf(p);
   float Te = sh.x;
-  float g = length(R.yz);
+  float g = max(length(R.yz), 1e-5);
   float px = uPix * t;
-  if (n.y < 0.7) {
-    // a riser: the cut edge of the card
-    Surf s = Surf(mix(uInk[LIT], uInk[SHADE], 0.12), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, exp(-t * 0.005));
-    return s;
-  }
-  float j0 = floor(R.x / Te);
   float fade = exp(-t * 0.005);
+  vec3 view = normalize(p - uCamP);
+  float j0 = floor(R.x / Te);
+  // the riser: the cut edge of the card
+  Surf rs = Surf(mix(uInk[LIT], uInk[SHADE], 0.12), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, fade);
+  // the tread
   Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.42), mix(uInk[SHADE], uInk[LIT], 0.38), 0.0, fade);
-  if (j0 < 0.5 && p.y < 0.5 * uTr[0]) {
+  bool tread = n.y > 0.7;
+  if (tread && j0 < 0.5 && p.y < 0.5 * uTr[0]) {
     // the valley floor
     s.lit = uInk[LIT]; s.shade = uInk[SHADE]; s.line = 0.0;
     if (uTr[14] > 0.5) {
@@ -137,21 +145,43 @@ Surf surf(vec3 p, vec3 n, float t) {
     }
     return s;
   }
+  // a riser belongs to the shelf it holds up: the lowest one whose top is above this point
+  float jt = j0;
+  if (!tread) {
+    float m = floor(p.y / Te);
+    jt = m + 1.0;
+    if (mod(jt, 2.0) > 0.5 && p.y - Te * m >= Te * (1.0 - sh.y)) jt += 1.0;
+  }
   // which field of which shelf: stable as far shelves merge
-  float jb = j0 * Te / uTr[0];
+  float jb = jt * Te / uTr[0];
   bool alongZ = abs(R.y) > abs(R.z);
   float fl = (alongZ ? p.z : p.x) / 46.0;
   vec4 r = cell4(ivec2(int(jb) + (alongZ ? 0 : 97), int(floor(fl))));
   float wet = step(r.x, uTr[8]);
   s.lit = mix(s.lit, mix(uInk[LOW], uInk[PAPER], 0.5), wet);
   s.shade = mix(s.shade, mix(uInk[LOW], uInk[SHADE], 0.28), wet);
+  // what a level tread prints as when nothing shades it
+  vec3 as = mix(mix(s.shade, uInk[TOP], 0.22), s.lit, toneOf(uSunDir.y));
+  if (!tread) {
+    // the lip: every shelf shows its edge as one ruled line, however little of its tread can be seen;
+    // a riser thinner than a pixel or two is printed as tread altogether
+    float hr = topOf(jt, sh) - topOf(jt - 1.0, sh);
+    float w = max(1.25 * px, 0.05 * uTr[0]);
+    float lip = 1.0 - smoothstep(w, w + 0.5 * px, topOf(jt, sh) - p.y);
+    lip = max(lip, 1.0 - smoothstep(1.2, 2.6, hr / px));
+    rs.lit = mix(rs.lit, as, lip); rs.shade = mix(rs.shade, as, lip); rs.line *= 1.0 - lip;
+    return rs;
+  }
   // the bund: a darker line along the outer edge of each tread, and across it between fields
-  float lip = (R.x - Te * j0) / max(g, 1e-5);
+  float lip = (R.x - Te * j0) / g;
   float w = max(0.5, 1.2 * px);
   float bund = 1.0 - smoothstep(w, w + px, lip);
   float cross = 1.0 - smoothstep(0.6 * w, 0.6 * w + px, (0.5 - abs(fract(fl) - 0.5)) * 46.0);
   bund = max(bund, cross) * fade * (0.35 + 0.65 * uTr[8]) * (1.0 - uTr[13]);
   s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.6), bund);
   s.shade = mix(s.shade, mix(uInk[SHADE], uInk[DEEP], 0.5), bund);
+  // a tread seen so nearly edge on that it is a sliver joins that line
+  float thin = 1.0 - smoothstep(0.8, 2.0, Te / g * abs(view.y) / px);
+  s.lit = mix(s.lit, as, thin); s.shade = mix(s.shade, as, thin); s.line *= 1.0 - thin;
   return s;
 }

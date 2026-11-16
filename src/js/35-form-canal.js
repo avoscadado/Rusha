@@ -13,6 +13,7 @@ FORMS.canal = {
     const odd = r.weighted([[0, 3], [1, 2.5], [2, 2.5], [3, 2]]);
     g.speed = r.range(5.4, 7.4); g.lead = 44; g.tilt = 0.012; g.focal = 1.9;
     g.path.y0 = r.range(2.6, 3.6);
+    g.path.ax = r.range(0.6, Math.min(2.2, half - 5)); g.path.fx = TAU / r.range(240, 380); g.path.px = r.range(0, TAU);
     const oz = Math.round((g.speed * r.range(15, 21)) / B), side = r.chance(0.5) ? 1 : -1;
     const dusk = g.pal.hour !== 2;
     const lit = g.pal.hour === 0 ? r.range(0.12, 0.3) : g.pal.hour === 1 ? r.range(0, 0.08) : 0;
@@ -27,7 +28,7 @@ FORMS.canal = {
     g.timbres = ['reed', 'bowed', 'glass']; g.space = 0.7;
     g.pulse = B; g.floodTo = 1.45;
     // the doors hang over the middle of the water, half way between two bridges
-    g.door = { r: Math.min(half * 0.62, 4.6), kin: [0, 0.4], stranger: [0, 10.5], from: 5.5, snap: bridges ? [bridges, 0] : null };
+    g.door = { r: Math.min(half * 0.62, 4.6) - 0.4, kin: [0, 0.4], stranger: [0, 10.5], from: 5.5, snap: bridges ? [bridges, 0] : null };
     g.facts = { width: Math.round(half * 2), floors: Math.round(low / storey), floorsMax: Math.round((low + more) / storey), odd, bridges, dusk };
     const ev = r.weighted([['lights', dusk ? 6 : 0], ['tide', 2.5], ['sunset', g.pal.hour === 1 ? 2 : 0], ['snow', 1], ['none', dusk ? 1 : 3]]);
     if (ev === 'lights') g.ev = { id: 1, type: 'lights', t0: 6, dur: 34 };

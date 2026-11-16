@@ -129,7 +129,7 @@ FORMS.viaduct = {
     g.fill = through ? [-sunSide, 0.3, -0.15, 1] : [0.1 * sunSide, 0.25, -1, 0.8];
     const shafts = through && hour !== 0 && (under === 'mist' || lay === 2 || rl.chance(0.4)) && rl.chance(0.75);
     f.through = through;
-    g.air = [lay === 2 ? rl.range(0.0026, 0.0036) : rl.range(0.0013, 0.0021), rl.int(5, 8), under === 'mist' ? Hall * 0.07 + 2 : -100, under === 'mist' ? 0.011 : 0];
+    g.air = [lay === 2 ? rl.range(0.0026, 0.0036) : rl.range(0.0013, 0.0021), rl.int(5, 8), -100, 0];
     if (lay === 2) g.sky[3] = 0;
 
     g.tr.set([bay, Hm, T, N + 10 * nUp, pw, w, k, hs, hT, lay === 0 ? side * X0 : X0, lay, floor,

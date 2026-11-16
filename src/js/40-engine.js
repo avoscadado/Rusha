@@ -14,7 +14,7 @@ const ENG = {
   cand: [null, null],      // kin, stranger: the worlds behind the portals
   doors: null,             // { z, born, chosen, auto } once the portals are open
   look: { yaw: 0, pitch: 0, tyaw: 0, tpitch: 0, idle: 9 },
-  camOff: [0, 0], roll: 0,
+  camOff: [0, 0], roll: 0, carry: [0, 0],
   fade: 0, fadeInk: [0, 0, 0],
   clock: 0, frame: 0, paused: false, gentle: false, started: false, linger: false, hurry: false,
   journey: { seed: 1, step: 0, kinRun: 0, plates: [] },
@@ -123,7 +123,7 @@ const ENG = {
     this.cur = this.makeRecord(key);
     this.cur.z = 0; this.cur.ta = 0;
     this.cand = [null, null]; this.doors = null;
-    this.camOff = [0, 0]; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
+    this.camOff = [0, 0]; this.carry = [0, 0]; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
     this.fade = 0; this.arrived = false; this.hurry = false;
     this.arrivalKind = opts.kind || 'first';
     if (!opts.quiet) { this.journey.step = opts.step || 0; }
@@ -263,6 +263,11 @@ const ENG = {
     this.journey.kinRun = k === 0 ? this.journey.kinRun + 1 : 0;
     this.cur = next; this.cand = [null, null]; this.doors = null; this.hurry = false;
     void E;
+    this.carry = [0, 0];
+    const fB = this.camera(next).fwd, fA = camA.fwd;
+    let dy = Math.atan2(fA[0], fA[2]) - Math.atan2(fB[0], fB[2]);
+    if (dy > Math.PI) dy -= TAU; else if (dy < -Math.PI) dy += TAU;
+    this.carry = [dy, Math.asin(clamp(fA[1], -1, 1)) - Math.asin(clamp(fB[1], -1, 1))];
     if (this.on.cross) this.on.cross(next, k);
   },
   choose(k) {
@@ -306,10 +311,13 @@ const ENG = {
       tgt = V.add(pos, V.norm(V.mix(base, [dir[0], dir[1], Math.max(dir[2], 0.2)], a)));
     }
     let f = V.norm(V.sub(tgt, pos));
-    const fwdBase = f;
+    // the heading carried through the last portal eases into this world's own line
+    const cy = this.carry[0] * settle, cp = this.carry[1] * settle;
+    const by = Math.atan2(f[0], f[2]) + cy, bp = clamp(Math.asin(clamp(f[1], -1, 1)) + cp, -1.2, 1.2);
+    const fwdBase = [Math.sin(by) * Math.cos(bp), Math.sin(bp), Math.cos(by) * Math.cos(bp)];
     // the viewer's own look, on top
     const L = this.look;
-    const yaw = Math.atan2(f[0], f[2]) + L.yaw, pitch = Math.asin(clamp(f[1], -1, 1)) + L.pitch;
+    const yaw = by + L.yaw, pitch = clamp(bp + L.pitch, -1.3, 1.3);
     f = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
     // bank a little into the bends of the line
     const bend = (WORLD.pathAt(g, z + 30)[0] - 2 * WORLD.pathAt(g, z + 15)[0] + p[0]) / 225;

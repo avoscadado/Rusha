@@ -5,32 +5,33 @@ FORMS.terraces = {
   SETW: { 1: [1.25, true], 2: [1.0, false], 3: [1.65, true], 4: [0.5, false], 5: [0.7, false], 6: [1.5, true], 7: [0.9, false], 8: [1.25, false] },
   build(g, S) {
     const r = S('terraces');
-    const T = r.pick([2, 3, 3, 4, 4, 5, 6]);
+    const T = r.pick([3, 3, 4, 4, 5, 6, 8]);
     const H = r.range(50, 140);
-    const slope = r.range(0.55, 1.15);
+    const slope = r.range(0.32, 1.15);
     const run = H / slope;
     const W = r.range(9, 26);
     const cove = r.chance(0.75) ? r.range(12, 55) : 0;
     const wave = r.range(230, 420);
     const c1 = r.range(0.45, 0.8);
     const lean = r.range(0, 1.8);
+    const spur = r.chance(0.8) ? r.range(25, 90) : 0, ks = TAU / r.range(150, 320);
     const wet = r.weighted([[0, 3], [1, 3.5], [0.5, 2.5]]);
     g.speed = r.range(12, 18); g.lead = 90; g.focal = 2.0;
     g.path.ax = r.range(14, 55); g.path.fx = TAU / r.range(520, 900); g.path.px = r.range(0, TAU);
-    g.path.y0 = Math.max(9, H * r.range(0.1, 0.36));
+    g.path.y0 = Math.max(9, H * r.range(0.1, 0.5));
     g.path.ay = r.range(0, 2.5); g.path.fy = TAU / r.range(300, 500); g.path.py = r.range(0, TAU);
-    g.tilt = -0.02 - 0.0016 * g.path.y0;
+    g.tilt = -0.03 - 0.003 * g.path.y0;
     // bounds on the slope and the curvature of the uncut ground, for the march
     let p1 = 0, p2 = 0;
     for (let i = 0; i <= 200; i++) {
       const s = i / 200, q = 1 + lean * s, b = s * (1 + lean) / q, b1 = (1 + lean) / (q * q), b2 = -2 * lean * (1 + lean) / (q * q * q);
       p1 = Math.max(p1, 6 * b * (1 - b) * b1); p2 = Math.max(p2, Math.abs(6 * (1 - 2 * b) * b1 * b1 + 6 * b * (1 - b) * b2));
     }
-    const K = 1 / wave, nG = 1.8 * K, nH = 8 * K * K, ps = g.path.ax * g.path.fx;
-    const ds = (Math.hypot(1, ps) + cove * nG) / run, hs = (g.path.ax * g.path.fx * g.path.fx + cove * nH) / run;
+    const K = 1 / wave, nG = 2.12 * K, nH = 10.5 * K * K, ps = g.path.ax * g.path.fx;
+    const ds = (Math.hypot(1, ps + 0.5 * spur * ks) + cove * nG) / run, hs = (g.path.ax * g.path.fx * g.path.fx + 0.5 * spur * ks * ks + cove * nH) / run;
     const G = H * (p1 * ds + c1 * nG);
     const C = H * (p2 * ds * ds + p1 * hs + 2 * p1 * c1 * ds * nG + c1 * nH);
-    g.tr.set([T, H, W, cove, run, K, lean, c1, wet, 0, 1 / Math.hypot(1, G), C, ps, 0, r.pick([0, 1, 1]), 60]);
+    g.tr.set([T, H, W, cove, run, K, lean, c1, wet, 0, 1 / Math.hypot(1, G), C, ks, 0, r.pick([0, 1, 1]), spur]);
     const shelves = Math.round((0.9 * H) / T);
     // water: a lake on the valley floor, a sea of mist, or dry
     const doorR = 5.5, clear = g.path.y0 - g.path.ay - doorR - 2;

@@ -26,7 +26,7 @@ float vBit(float b) { return step(0.5, mod(floor(uTr[15] / b), 2.0)); }
 float archSD(vec2 q, float a, float k, float sill) {
   float leg = max(max(abs(q.x) - a, q.y), -sill - q.y);
   float R = a * (k * k + 1.0) * 0.5;
-  float top = max(length(vec2(abs(q.x) + R - a, q.y)) - R, -q.y);
+  float top = max(length(vec2(abs(q.x) + R - a, q.y)) - R, -q.y - min(sill, 0.5 * a));   // overlaps the legs: no film at the springing
   return min(leg, top);
 }
 
@@ -112,7 +112,7 @@ float map(vec3 p) {
     d = min(d, max(max(ax - w - e, cv - 0.62 * pw), q.y - Hm + 0.9));
     foot += 0.35 + 0.5 * w;
   }
-  if (fy > -20.0) d = min(d, max(max(ax - w - foot, cv - pw - 0.8), q.y - 2.2));
+  d = min(d, max(max(ax - w - foot, cv - pw - 0.8), q.y - 2.2));
   // the arcade of small arches on top
   float wt = w;
   if (nUp > 0.5) {
@@ -137,6 +137,11 @@ float map(vec3 p) {
   }
   if (uTr[10] > 1.5) {                             // the nave: one deck over both rows, and a rib across at every pier
     d = min(d, max(q.x, abs(q.y - Hm + 0.7) - 0.7));
+    if (vBit(1.0) > 0.5) {                         // its lamps stand inside, on the feet of the piers
+      vec3 l = vec3(q.x + w + foot - 0.55, q.y - 2.2, cv);
+      d = min(d, sdBox(l - vec3(0.0, 1.6, 0.0), vec3(0.14, 1.6, 0.14)));
+      d = min(d, length(l - vec3(0.0, 3.6, 0.0)) - 0.5);
+    }
     float ar = uTr[9] - w - 0.25, hr = Hm - 2.3 - ar;
     d = min(d, max(max(max(cv - 0.5 * pw, q.x), q.y - Hm), -archSD(vec2(p.x, q.y - hr), ar, 1.0, 1e4)));
   }
@@ -187,6 +192,14 @@ Surf surf(vec3 p, vec3 n, float t) {
   float px1 = vPx(p, cdx);
   float wd = (nUp > 0.5 ? 0.82 * w : w) + 0.8;
   // lamps: come on one at a time
+  if (vBit(1.0) > 0.5 && uTr[10] > 1.5 && q.y < 6.5) {
+    float foot = 0.9 + vBit(4.0) * (0.35 + 0.5 * w);
+    if (length(vec3(q.x + w + foot - 0.55, q.y - 5.8, cv)) < 0.62 + 0.003 * t) {
+      float on = max(vBit(2.0), step(cell1(ivec2(int(floor(q.z / S + 0.5)), 40 + (p.x > 0.0 ? 3 : 0))), uEv.x * 1.02 - 0.01));
+      s.lit = mix(s.lit, uInk[ACCENT], on); s.shade = mix(s.shade, uInk[ACCENT], on); s.glow = on;
+      return s;
+    }
+  }
   if (vBit(1.0) > 0.5 && q.y > Hc + 2.45) {
     float lod = smoothstep(1.0, 2.6, S * px1);
     vec3 l = vec3(ax - wd + 0.4, q.y - Hc - 2.4, cv);

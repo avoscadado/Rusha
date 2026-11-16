@@ -22,6 +22,9 @@ FORMS.plain = {
     const W = { 1: r.range(0.9, 1.6), 2: r.range(1.1, 1.9), 3: 1.0, 4: r.range(0.8, 1.1), 5: 1 }[kind];
     g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.012;
     g.path.y0 = r.range(3.4, 6.5);
+    // the line wanders a little between its two rows
+    g.path.ax = r.range(1.5, Math.min(5, spacing * 0.5 - W - 3.5)); g.path.fx = TAU / r.range(260, 420); g.path.px = r.range(0, TAU);
+    const lineX = (z) => g.path.ax * Math.sin(z * g.path.fx + g.path.px);
     const hasSet = r.chance(0.5);
     let odd = kind === 5 ? r.pick([1, 3]) : kind === 3 ? r.pick([1, 2, 3, 4]) : r.int(1, 4);
     if (hasSet && r.chance(0.5)) odd = 0;
@@ -39,7 +42,8 @@ FORMS.plain = {
       const scale = type === 8 ? r.range(7, 12) : r.range(9, 20);
       const onLine = type === 1 || type === 3 || type === 6;
       const side = (r.chance(0.5) ? 1 : -1) * (type === 4 ? r.range(2.6, 3.8) : r.range(1.4, 2.4)) * scale;
-      g.set = { type, pos: [onLine ? 0 : side, 0, g.speed * r.range(25, 30)], scale, yaw: 0, attend: onLine ? 0.15 : 0.8, eye: 2, move: 0, lit: 0 };
+      const sz = g.speed * r.range(25, 30);
+      g.set = { type, pos: [(onLine ? 0 : side) + lineX(sz), 0, sz], scale, yaw: 0, attend: onLine ? 0.15 : 0.8, eye: 2, move: 0, lit: 0 };
       if (type === 3) g.path.y0 = 1.55 * scale;                // the way goes through the ring
       if (type === 1) g.path.y0 = Math.min(g.path.y0, 2.2 * scale);
       g.ev = { id: 1, type: 'rise', t0: 9, dur: 13 };

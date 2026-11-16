@@ -14,6 +14,7 @@ FORMS.cistern = {
     const odd = r.weighted([[0, 3], [1, 2.5], [2, 1.5], [3, 2]]);
     g.speed = r.range(4.6, 6.4); g.lead = 34; g.tilt = 0; g.focal = 1.85;
     g.path.y0 = r.range(2.1, 3.0);
+    g.path.ax = r.range(0.3, 0.7); g.path.fx = TAU / r.range(160, 260); g.path.px = r.range(0, TAU);
     const oz = Math.round((g.speed * r.range(15, 21)) / bay), side = r.chance(0.5) ? 1 : -1;
     const lamps = !hole || r.chance(0.3) ? 1 : 0;
     g.tr.set([bay, H, spring, rad, r.chance(0.3) ? 1 : 0, arc, hole, every, oz, odd, side, rad * 0.75, lamps, 0]);
@@ -26,7 +27,7 @@ FORMS.cistern = {
     g.fill = [-0.25 * Math.sign(g.sunAz), 0.35, -0.9, 1];
     g.interior = true; g.space = 0.95; g.timbres = ['organ', 'bowed', 'bell'];
     g.pulse = bay; g.floodTo = 1.4;
-    const clear = Math.min(bay * 0.5 - rad, 2.6) * 0.8;
+    const clear = Math.min(bay * 0.5 - rad * 1.4 - 0.8, 2.4);
     g.door = { r: clear, kin: [0, 0.1], stranger: [0, arc ? Math.min(spring + 0.5, H - clear - 0.8) - g.path.y0 : H - clear - 1.2 - g.path.y0] };
     g.facts = { bay, H: Math.round(H), odd, hole: !!hole, lamps: !!lamps, arc };
     const ev = r.weighted([['tide', 3], [lamps ? 'lights' : 'none', 3], ['none', 2]]);
