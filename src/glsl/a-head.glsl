@@ -57,6 +57,10 @@ float cellExit(vec2 q, float S) {
   vec2 tw = (S * 0.5 - q * sign(gRd.xz)) * inv;
   return min(tw.x, tw.y) + 0.02 * S;
 }
+// the same for forms that repeat along z only
+float cellExitZ(float qz, float S) {
+  return (S * 0.5 - qz * sign(gRd.z)) / max(abs(gRd.z), 1e-4) + 0.02 * S;
+}
 
 struct Surf { vec3 lit; vec3 shade; float glow; float line; };
 

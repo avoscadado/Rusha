@@ -83,7 +83,7 @@ const WORLD = {
       sky: [0.3, 1, 0, 0],
       body: new Float32Array(8), bodyK: new Float32Array(8),
       part: [0, 0, 0, 1], cover: 0, fill: [0, 1, 0, 0],
-      door: { r: 7, kin: [0, 0], stranger: [9, 7] }, doorsAt: 46,
+      door: { r: 7, kin: [0, 0], stranger: [9, 7] }, doorsAt: 38,
       pulse: 0, mistTop: 3, floodTo: 1.2, interior: false,
       timbres: ['glass', 'bell'], space: 0.6,
       facts: {}, changeType: null,

@@ -186,7 +186,8 @@ const ENG = {
   openDoors() {
     const w = this.cur, g = w.g;
     const ahead = g.speed * 15;
-    const z = w.z + ahead;
+    let z = w.z + ahead;
+    if (g.door.snap) { const [per, ph] = g.door.snap; z = (Math.ceil((z - ph) / per) + 0.5) * per + ph; }   // clear of bridges and the like
     const p = WORLD.pathAt(g, z);
     const mk = (o) => ({ c: [p[0] + o[0], p[1] + o[1], z], r: g.door.r });
     // hands-off, the flight takes kin twice and then a stranger
@@ -214,7 +215,7 @@ const ENG = {
     }
     // the line of flight bends to pass through the centre of the chosen portal
     const o = D.chosen === 0 ? g.door.kin : g.door.stranger;
-    const pull = 1 - smooth(g.speed * 2.5, g.speed * 10, left);
+    const pull = 1 - smooth(g.speed * 2.5, g.speed * (g.door.from || 10), left);
     this.camOff[0] = damp(this.camOff[0], o[0] * pull, 2.5, dt);
     this.camOff[1] = damp(this.camOff[1], o[1] * pull, 2.5, dt);
     if (left <= 0) this.cross();

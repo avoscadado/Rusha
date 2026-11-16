@@ -193,13 +193,17 @@ void main() {
       }
       float ndl = dot(n, uSunDir), sh = 0.0;
       if (ndl > 0.0 && uSunDir.y > -0.02) {
-        sh = 1.0; float st = 0.02 + 0.004 * t; vec3 sp = p + n * (0.01 + 0.002 * t);
+        sh = 1.0; float st = 0.02 + 0.004 * t, ph = 1e9; vec3 sp = p + n * (0.01 + 0.002 * t);
         gRd = uSunDir;
         for (int i = uZero; i < 48; i++) {
           if (i >= nShadow) break;
           float d = map(sp + uSunDir * st);                // map call site 3 of 3
           cost += 1.0;
-          sh = min(sh, uSun.w * gD / st);                   // real surfaces only: a cell wall casts no shadow
+          // real surfaces only (a cell wall casts no shadow); the closest approach is estimated
+          // from this sample and the last, which keeps penumbras free of contour lines
+          float y = gD * gD / (2.0 * ph), dd = sqrt(max(gD * gD - y * y, 0.0));
+          sh = min(sh, uSun.w * dd / max(st - y, 1e-3));
+          ph = gD;
           st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
           if (sh < 0.02 || st > SHFAR) break;
         }

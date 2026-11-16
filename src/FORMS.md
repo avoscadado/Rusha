@@ -45,7 +45,7 @@ Rules you must keep yourself:
 - Water is not yours: set `g.sea` and the engine draws it, reflections included.
 
 Helpers in a-head: `vnoise`, `vnoise1`, `vnoise2`, `cell4`, `cell1`, `ign`, `rot`, `sdBox`, `sdBox2`, `sdCyl`,
-`sdTorus`, `sdSeg`, `stairs`, `pathXY`, `cellExit`, `setPiece`, `setSurf`. Uniforms you may read: `uTr[16]`
+`sdTorus`, `sdSeg`, `stairs`, `pathXY`, `cellExit`, `cellExitZ` (for forms that repeat along z only), `setPiece`, `setSurf`. Uniforms you may read: `uTr[16]`
 (your traits), `uEv.x` (event progress 0..1), `uSea`, `uTime`, `uCamP` (for level of detail), `uSunDir`, `uPix`, `uInk[8]`
 with indices `TOP LOW GLOW LIT SHADE DEEP PAPER ACCENT`.
 
@@ -83,7 +83,7 @@ Never: ethereal, ancient, forgotten, endless, whisper, dream, realm, mysterious,
 node build.mjs /tmp/x/index.html
 node tools/shot.mjs sheet.jpg "seed={}&form=NAME" --page /tmp/x/index.html --t 16 --sheet A1,A2,A3,A4,A5,A6 --cols 3
 node tools/shot.mjs cost.png "seed=A1&form=NAME" --page /tmp/x/index.html --t 16 --cost     # px.r is mean march cost * 255 / 200
-node tools/shot.mjs doors.jpg "seed=A1&form=NAME" --page /tmp/x/index.html --t 47,55,59,60.5,61.2,63 --cols 3
+node tools/shot.mjs doors.jpg "seed=A1&form=NAME" --page /tmp/x/index.html --t 39,47,51,52.6,53.2,55 --cols 3
 node tools/shot.mjs kin.jpg "seed=A1&form=NAME&change={}" --page /tmp/x/index.html --t 16 --sheet 11,22,33,44,55,66
 ```
 
