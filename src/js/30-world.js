@@ -203,6 +203,14 @@ const WORLD = {
       const c = CHANGES[g.changeType];
       name = `${w.name}, ${c.label}`;
       line = (g.changeType === 'later' && g.laterLine) || (F.changeLines && F.changeLines[g.changeType]) || c.line;
+    } else {
+      // titled as prints are: the place, then its hour or its weather
+      const r = stream(g.key.base >>> 0, 'when'), h = g.pal.hour, e = g.ev.type;
+      const when = e === 'snow' ? 'Snow' : e === 'mist' ? 'Mist' : e === 'sunset' ? 'Sunset'
+        : h === 0 ? (g.heir.label && !g.interior ? 'Moonlight' : 'Night')
+        : h === 1 ? (g.pal.temp > 0.25 ? r.pick(['Evening', 'Dusk']) : r.pick(['Morning', 'First Light']))
+        : r.pick(['Noon', 'Afternoon', 'Clear Day']);
+      name = `${w.name}, ${when}`;
     }
     if (g.heir.label && g.heir.age >= 2 && !g.interior) {
       line += ` The ${g.heir.label} has followed for ${numWord(g.heir.age + 1)} plates.`;

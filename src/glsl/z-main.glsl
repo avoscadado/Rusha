@@ -288,7 +288,7 @@ void main() {
         float foot = uPix / max(-rd.y, 0.004), stroke = 0.0;
         for (int k = uZero; k < 3; k++) {
           float f = k == 0 ? 26.0 : (k == 1 ? 8.0 : 2.5);
-          float show = smoothstep(0.012, 0.035, f * foot) * (1.0 - smoothstep(0.1, 0.26, f * foot));
+          float show = smoothstep(0.03, 0.07, f * foot) * (1.0 - smoothstep(0.1, 0.26, f * foot));
           // the coarser the stroke, the longer it is drawn: slivers, never puddles
           float wk = k == 0 ? w1 : vnoise(vec2(lat * (k == 1 ? 4.0 : 2.0) + float(k) * 5.3 + uTime * 0.02, ld * f * 1.6 - uTime * 0.013 * f));
           stroke = max(stroke, show * smoothstep(0.74, 0.77, wk));

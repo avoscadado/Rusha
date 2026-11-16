@@ -39,8 +39,8 @@ FORMS.plain = {
     g.tr.set([kind, spacing, H, jit, kind === 5 ? 0.45 : r.range(0.78, 1), odd ? ox : 9999, oz, odd, 0, r.int(0, 1), W]);
     const wet = r.chance(0.55);
     if (wet) g.sea = [2, 0.03, r.range(0.4, 1), 0];
-    // over water the eye is tipped down to the reflections; over dry ground, up to the sky
-    g.tilt = wet ? -cm.range(0.05, 0.11) : cm.range(0.07, 0.15);
+    // the eye is tipped up a little, so the horizon sits low and the sky has room
+    g.tilt = wet ? cm.range(0.02, 0.08) : cm.range(0.07, 0.15);
     g.floodTo = 0.6; g.mistTop = H * 0.55 + 1;
     g.door = { r: 5.5, kin: [-side * 2, 0.6], stranger: [side * 9, 7.5] };
     g.pulse = spacing;
