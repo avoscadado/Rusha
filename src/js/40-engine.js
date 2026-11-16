@@ -46,7 +46,7 @@ const ENG = {
   // after a lost context every GL object is gone; worlds are rebuilt from their keys
   rebuild() {
     const keep = { cur: this.cur && this.cur.key, t: this.cur && this.cur.t, z: this.cur && this.cur.z };
-    this.progs.clear(); this.tg = null;
+    this.progs.clear(); this.tg = null; this.warmed = false;
     this.init(this.canvas); this.resize(true);
     if (keep.cur) { this.goTo(keep.cur, { quiet: true }); }
     if (this.on.restored) this.on.restored();
@@ -63,6 +63,28 @@ const ENG = {
     return p;
   },
   compiling() { for (const p of this.progs.values()) if (p.state === 'compiling') return true; return false; },
+
+  // Compile every form's program, one at a time, as soon as the first world is on
+  // screen. Most of this happens behind the start veil, so by the time a portal
+  // needs a program it is already built and has been drawn with once.
+  warm() {
+    if (this.warmed || this.compiling() || !this.tg) return;
+    for (const name of WORLD.formNames()) {
+      if (this.badForms.has(name) || (FORMS[name].weight ?? 1) <= 0) continue;   // unfinished forms are never picked
+      const had = this.progs.has(name), p = this.programFor(name);
+      if (!had) return;                                    // just started: come back when it is done
+      if (p.state === 'failed') { this.badForms.add(name); this.errors.push('form ' + name + ': ' + (p.error || 'failed')); continue; }
+      if (p.state === 'ready' && !p.drawn) {
+        // one pixel through the real pipeline, so the driver finishes its own late work now
+        const rec = this.makeRecord({ base: 0x1234567, change: 0, heir: 1, age: 0, form: name });
+        const cam = { pos: [0, rec.g.path.y0, 0], right: [1, 0, 0], up: [0, 1, 0], fwdUser: [0, 0, 1], fwd: [0, 0, 1], focal: 2, aspect: 1 };
+        this.setWorld(rec, cam, { clip: [0, 0, 1, 0] });
+        GLX.draw(this.tg.p0, this.rw, this.rh, [0, 0, 1, 1]);
+        p.drawn = true;
+      }
+    }
+    this.warmed = true;
+  },
 
   // ---- sizes ----
   resize(force) {
@@ -122,9 +144,10 @@ const ENG = {
     // a kin should differ from this place in a new way, not repeat the last change
     for (let i = 0; i < 4 && kin.g.changeType === this.cur.g.changeType; i++) { kk.change = mix32(kk.change + 7919) || 1; kin = this.makeRecord(kk); }
     let stranger = this.makeRecord(sk);
-    // a stranger must not land on a form whose shader failed on this device
+    // a stranger is a different kind of place, and never a form whose shader failed on this device
     let tries = 0;
-    while (this.badForms.has(stranger.g.form) && tries++ < 12) { sk.base = mix32(sk.base + 977); stranger = this.makeRecord(sk); }
+    const usable = WORLD.formNames().filter((n) => !this.badForms.has(n) && (FORMS[n].weight ?? 1) > 0).length;
+    while ((this.badForms.has(stranger.g.form) || (usable > 1 && stranger.g.form === this.cur.g.form)) && tries++ < 16) { sk.base = mix32(sk.base + 977); stranger = this.makeRecord(sk); }
     this.cand = [kin, stranger];
   },
 
@@ -141,6 +164,7 @@ const ENG = {
     }
     if (st === 'failed') { this.failWorld(w); return; }
     if (st !== 'ready') return;
+    this.warm();
     if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w, this.arrivalKind || 'first'); }
     if (this.paused) dt = 0;
     this.clock += dt; this.frame++;
@@ -187,11 +211,16 @@ const ENG = {
     const w = this.cur, g = w.g;
     const ahead = g.speed * 15;
     let z = w.z + ahead;
-    if (g.door.snap) { const [per, ph] = g.door.snap; z = (Math.ceil((z - ph) / per) + 0.5) * per + ph; }   // clear of bridges and the like
+    if (g.door.snap) {                                     // keep clear of bridges and the like
+      const [per, ph] = g.door.snap;
+      let zs = (Math.floor((z - ph) / per) + 0.5) * per + ph;
+      if (zs < z - 0.25 * per) zs += per;
+      z = zs;
+    }
     const p = WORLD.pathAt(g, z);
     const mk = (o) => ({ c: [p[0] + o[0], p[1] + o[1], z], r: g.door.r });
-    // hands-off, the flight takes kin twice and then a stranger
-    const auto = this.journey.kinRun >= 2 ? 1 : 0;
+    // hands-off, the flight looks once more at each place, changed, and then moves on
+    const auto = this.journey.kinRun >= 1 ? 1 : 0;
     this.doors = { z, born: w.ta, auto, chosen: auto, picked: false, d: [mk(g.door.kin), mk(g.door.stranger)], open: 0, gaze: [0, 0] };
     for (const c of this.cand) { c.t = 0; c.ta = 0; }
     this.hurry = false;
@@ -415,6 +444,8 @@ const ENG = {
     this.stats.fps = 1 / avg;
     const target = Math.max(G.floor * 1.12, 1 / 58);
     if (avg > target * 1.18) {
+      // at the floor already: give up reflections of the scene and some shadow detail before anything else
+      if (this.budget <= this.budgetMin * 1.01 && !this.lite) { this.lite = true; this.quality = { steps: Math.min(this.quality.steps, 80), reflect: 0, shadow: 14 }; }
       this.budget = Math.max(this.budgetMin, this.budget * (avg > target * 1.8 ? 0.6 : 0.82));
       G.hold = 0; G.wait = Math.min(G.wait * 1.6, 40);
       this.resize();

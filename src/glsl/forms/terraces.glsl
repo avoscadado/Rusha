@@ -10,7 +10,8 @@
 //
 //   uTr[0] shelf height T      uTr[1] hill height H      uTr[2] half width of the valley floor
 //   uTr[3] extra width of the coves                      uTr[4] run of the hillside, foot to shoulder
-//   uTr[5] 1 / wavelength of the hills                   uTr[6], uTr[7] hill height = H * (uTr[6] + uTr[7] * noise)
+//   uTr[5] 1 / wavelength of the hills                   uTr[6] how early the hillside steepens (0 = an even S)
+//   uTr[7] how much the hills differ in height: H * (1 - uTr[7] + uTr[7] * noise)
 //   uTr[8] how many shelves hold water 0..1              uTr[9] huts: share of cells with one, 0 none
 //   uTr[10] 1 / sqrt(1 + G * G), G the steepest slope    uTr[11] bound on the curvature of r
 //   uTr[12] steepest sideways slope of the flight line   uTr[13] slump 0..1: every second shelf has sunk this far
@@ -38,9 +39,10 @@ vec3 rawG(vec2 x) {
   vec2 dn = uTr[5] * vec2(dw.x * mix(b - a, e - d, w.y), dw.y * mix(d - a, e - b, w.x));
   float s = (abs(u) - uTr[2] - uTr[3] * (1.0 - n)) / uTr[4];
   vec2 ds = ((u < 0.0 ? -1.0 : 1.0) * vec2(1.0, uz) + uTr[3] * dn) / uTr[4];
-  float sc = clamp(s, 0.0, 1.0);
-  float P = sc * sc * (3.0 - 2.0 * sc), dP = 6.0 * sc * (1.0 - sc);
-  float M = uTr[6] + uTr[7] * n;
+  float sc = clamp(s, 0.0, 1.0), kb = 1.0 / (1.0 + uTr[6] * sc);
+  float bs = sc * (1.0 + uTr[6]) * kb;                 // the profile: an S, leaning toward the valley
+  float P = bs * bs * (3.0 - 2.0 * bs), dP = 6.0 * bs * (1.0 - bs) * (1.0 + uTr[6]) * kb * kb;
+  float M = 1.0 - uTr[7] + uTr[7] * n;
   return vec3(uTr[1] * P * M, uTr[1] * (dP * M * ds + P * uTr[7] * dn));
 }
 
@@ -99,9 +101,10 @@ float map(vec3 p) {
     }
     d = max(d, st);
     // the open air of the valley: no hill stands higher than the envelope H * P((|u| - W) / run)
-    float Hm = uTr[1] * (uTr[6] + uTr[7]);
+    float Hm = uTr[1];
     float yr = gRd.y < 0.0 ? 0.6 * p.y : p.y;
-    float need = yr >= Hm ? 1e5 : uTr[2] + uTr[4] * (0.5 - sin(asin(1.0 - 2.0 * yr / Hm) / 3.0));
+    float bn = 0.5 - sin(asin(1.0 - 2.0 * min(yr / Hm, 1.0)) / 3.0);
+    float need = yr >= Hm ? 1e5 : uTr[2] + uTr[4] * bn / (1.0 + uTr[6] * (1.0 - bn));
     float se = (need - abs(u)) / max(abs(gRd.x) + uTr[12] * abs(gRd.z), 1e-4);
     if (gRd.y < 0.0) se = min(se, 0.4 * p.y / -gRd.y);
     d = max(d, se);
