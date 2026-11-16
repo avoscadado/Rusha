@@ -71,6 +71,7 @@ function boot() {
   ENG.on.restored = () => { if (UI.begun) $('veil').classList.add('open', 'gone'); else { offered = false; } };
   ENG.on.fail = (msg) => { const v = $('veil'); v.className = ''; $('veil-go').hidden = true; $('veil-note').hidden = true; veilSub.textContent = msg; };
 
+  if (Q.has('debug')) $('stat').hidden = false;
   UI.wire();
   let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => ENG.resize(), 120); });
   // the caption changes height from plate to plate, and the picture above it must follow

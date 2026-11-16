@@ -78,7 +78,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     s.lit = mix(uInk[LIT], uInk[PAPER], 0.6);
     return s;
   }
-  if (ax < Wc - 0.5) {                                        // a mooring pole, with a painted head
+  if (abs(ax - Wc + 1.3) < 0.75 && p.y < 3.0 && p.y > -2.9) {   // a mooring pole, with a painted head
     s.lit = mix(uInk[SHADE], uInk[LIT], 0.3); s.shade = uInk[DEEP];
     if (p.y > 2.1) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[DEEP], 0.4); }       // the accent ink, in small
     return s;

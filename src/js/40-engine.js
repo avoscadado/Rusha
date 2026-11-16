@@ -175,7 +175,7 @@ const ENG = {
     if (st !== 'ready') return;
     this.warm();
     if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w, this.arrivalKind || 'first'); }
-    this.fade = Math.min(1, this.fade + dt / 2.2);         // a plate fades in even while paused
+    this.fade = Math.min(1, this.fade + dt / (this.started ? 2.2 : 0.5));   // a plate fades in even while paused, and quickly behind the veil
     if (this.paused) dt = 0;
     this.clock += dt; this.frame++;
     const g = w.g;

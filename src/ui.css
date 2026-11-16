@@ -1,7 +1,7 @@
 @property --hole { syntax: '<length-percentage>'; inherits: false; initial-value: 0px; }
 :root {
   --paper: #f4ecdc; --ink: #1c1b22; --soft: rgba(28,27,34,.56); --hair: rgba(28,27,34,.18); --accent: #e23d28;
-  --mat: clamp(16px, 2.6vmin, 38px);
+  --mat: clamp(16px, 4.4vmin, 60px);
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
 }
@@ -23,7 +23,7 @@ button:focus-visible, #line a:focus-visible { outline: 2px solid var(--accent); 
 #cap-no { color: var(--soft); }
 #cap-name { margin: .38em 0 .12em; font-size: clamp(20px, 2.2vw, 31px); font-weight: 400; line-height: 1.12; letter-spacing: .005em; }
 #cap-line { margin: 0; max-width: 68ch; font-size: clamp(14px, 1.2vw, 17px); text-wrap: pretty; }
-#cap-hint { margin: .3em 0 0; min-height: 1.3em; font-style: italic; font-size: 13.5px; color: var(--soft); opacity: 0; transition: opacity 1.4s ease; }
+#cap-hint { margin: .45em 0 0; min-height: 1.3em; font-style: italic; font-size: 14px; color: var(--ink); opacity: 0; transition: opacity 1.4s ease; }
 #cap-hint.on { opacity: 1; }
 #keys { flex: 0 0 auto; display: flex; gap: clamp(14px, 1.8vw, 26px); padding-top: 1px; white-space: nowrap; }
 #keys button, #more .row button { color: var(--soft); padding: 6px 0; border-bottom: 1px solid transparent; transition: color .25s, border-color .25s; }
@@ -64,7 +64,7 @@ button:focus-visible, #line a:focus-visible { outline: 2px solid var(--accent); 
 #veil-in { text-align: center; padding: 0 24px max(8vh, 40px); max-width: 640px; }
 #veil-title { font-size: clamp(30px, 5.2vw, 62px); line-height: 1.05; letter-spacing: .01em; }
 #veil-sub { margin: 1.2em 0 0; color: var(--soft); }
-#veil-note { margin: 1.1em auto 0; max-width: 40ch; font-size: clamp(14px, 1.3vw, 17px); color: var(--soft); font-style: italic; }
+#veil-note { margin: 1.3em auto 0; max-width: 46ch; font-size: clamp(14px, 1.3vw, 17px); color: var(--soft); font-style: italic; }
 #veil-go { margin-top: 1.9em; display: flex; flex-wrap: wrap; gap: 12px 16px; justify-content: center; }
 #veil-go button { padding: 13px 24px; font: 600 11px/1 var(--sans); letter-spacing: .2em; text-transform: uppercase; box-shadow: inset 0 0 0 1px var(--ink); transition: background-color .25s, color .25s; }
 #veil-go button:first-child, #veil-go button:hover { background: var(--ink); color: var(--paper); }
@@ -82,7 +82,8 @@ body.bleed #foot:focus-within { opacity: 1; }
 body.bleed #foot:focus-within > nav { pointer-events: auto; }
 body.bleed.idle #view { cursor: none; }
 body.bleed #foot { --ink: #fff; --soft: rgba(255,255,255,.72); --hair: rgba(255,255,255,.3); }
-body.bleed #more { --paper: rgba(16,16,22,.9); }
+body.bleed #more { --paper: #17171d; }
+body.bleed.more-open #caption { visibility: hidden; }
 body.shot #foot, body.shot #veil, body.shot #more { display: none; }
 
 @media (max-width: 720px) {

@@ -36,24 +36,26 @@ const UI = {
 
   // the sheet takes the colour of the world's own paper; night plates are mounted on dark card
   mount(g) {
+    // always paper, as a print is: a night plate is mounted on a sheet a shade greyer, never on black
     const night = g.pal.hour === 0;
-    const paper = night ? V.mix(g.pal.deep, g.pal.shade, 0.35) : V.mix(g.pal.paper, [1, 1, 1], 0.25);
-    const ink = night ? V.mix(g.pal.paper, g.pal.low, 0.12) : V.mix(g.pal.deep, [0, 0, 0], 0.25);
+    const paper = night ? V.mix(V.mix(g.pal.paper, [1, 1, 1], 0.1), g.pal.shade, 0.16) : V.mix(g.pal.paper, [1, 1, 1], 0.25);
+    const ink = V.mix(g.pal.deep, [0, 0, 0], 0.25);
     const st = document.documentElement.style;
     st.setProperty('--paper', cssColor(paper)); st.setProperty('--ink', cssColor(ink));
-    st.setProperty('--soft', cssColor(ink, 0.6)); st.setProperty('--hair', cssColor(ink, 0.2));
-    st.setProperty('--accent', cssColor(night ? V.mix(g.pal.accent, g.pal.paper, 0.15) : g.pal.accent));
+    st.setProperty('--soft', cssColor(ink, 0.7)); st.setProperty('--hair', cssColor(ink, 0.22));
+    st.setProperty('--accent', cssColor(g.pal.accent));
     const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.content = cssColor(paper);
   },
 
   caption(w, kind) {
     const g = w.g, cap = $('caption');
     const n = this.plates.length ? this.plates[this.here].n : 1;
-    const from = kind === 'kin' ? `Kin of plate ${n - 1}` : kind === 'stranger' ? 'A stranger' : kind === 'again' ? 'Again' : '';
+    const from = kind === 'kin' ? `kin of plate ${n - 1}` : kind === 'stranger' ? 'a stranger' : kind === 'again' ? 'again' : '';
     cap.classList.add('turning');
     clearTimeout(this._ct);
     this._ct = setTimeout(() => {
-      $('cap-no').textContent = `Plate ${n}` + (from ? `  ·  ${from}` : '') + `  ·  ${g.pal.name}`;
+      // the measurements live up here, as data, so the sentence below is free of them
+      $('cap-no').textContent = [`Plate ${n}`, from, g.data, `printed in ${g.pal.name}`].filter(Boolean).join('  \u00b7  ');
       $('cap-name').textContent = g.name;
       $('cap-line').textContent = g.line;
       document.title = `${g.name} · Kin and Stranger`;
@@ -110,7 +112,7 @@ const UI = {
       AUDIO.setPaused(ENG.paused);
       if (ENG.doors) AUDIO.setDestinations(ENG.cand[0] && ENG.cand[0].g.audio, ENG.cand[1] && ENG.cand[1].g.audio);
     }
-    $('b-sound').setAttribute('aria-pressed', String(this.soundOn));
+    $('b-sound').setAttribute('aria-pressed', String(this.soundOn)); $('b-sound').textContent = this.soundOn ? 'Sound on' : 'Sound off';
     this.store.sound = this.soundOn; this.save();
   },
 
@@ -121,9 +123,10 @@ const UI = {
   },
   setBleed(on) { document.body.classList.toggle('bleed', !!on); $('b-bleed').setAttribute('aria-pressed', String(!!on)); this.store.bleed = !!on; this.save(); requestAnimationFrame(() => ENG.resize()); },
   setGentle(on) { ENG.gentle = !!on; $('b-gentle').setAttribute('aria-pressed', String(!!on)); this.store.gentle = !!on; this.save(); },
-  setStay(on) { ENG.linger = !!on; $('b-stay').setAttribute('aria-pressed', String(!!on)); this.toast(on ? 'Staying. The doors will wait.' : 'Going on.'); },
+  setStay(on) { ENG.linger = !!on; $('b-stay').setAttribute('aria-pressed', String(!!on)); $('b-stay').textContent = on ? 'Staying' : 'Stay here'; this.toast(on ? 'Staying. The doors will wait.' : 'Going on.'); },
   setMore(on) {
     $('more').hidden = !on; $('b-more').setAttribute('aria-expanded', String(!!on));
+    document.body.classList.toggle('more-open', !!on);
     if (on) { this.drawLine(); this.stat(); }
   },
   stat() {
@@ -132,7 +135,7 @@ const UI = {
   },
   onward() {
     if (ENG.doors) { ENG.hurry = true; return; }
-    ENG.hurry = true; ENG.linger = false; $('b-stay').setAttribute('aria-pressed', 'false');
+    ENG.hurry = true; ENG.linger = false; $('b-stay').setAttribute('aria-pressed', 'false'); $('b-stay').textContent = 'Stay here';
     this.toast('The doors are coming');
   },
 
@@ -258,6 +261,7 @@ const UI = {
       else if (k === 'ArrowRight') nudge(0.16, 0);
       else if (k === 'ArrowUp') nudge(0, 0.1);
       else if (k === 'ArrowDown') nudge(0, -0.1);
+      else if (k === 'd') $('stat').hidden = !$('stat').hidden;
       else if (k === 'Escape') this.setMore(false);
       else used = false;
       if (used) { e.preventDefault(); this.wake(); }
@@ -277,10 +281,9 @@ const UI = {
   // the first world is ready behind the veil: show it through a hole, and offer the two ways in
   offer() {
     this.offered = true;
-    $('veil-sub').textContent = 'a survey of places that do not exist';
+    $('veil-sub').textContent = 'a survey in eight inks';
     $('veil-go').hidden = false; $('veil-note').hidden = false;
     $('veil').classList.add('peek');
-    $('go-sound').focus({ preventScroll: true });
   },
   begin(withSound) {
     if (this.begun) return; this.begun = true;
@@ -306,19 +309,28 @@ const UI = {
     this.caption(w, kind || '');
     this.hint('');
   },
-  doorsOpen() {
-    const n = this.store.hints || 0;
-    if (n < 3) {
-      this.hint('Two doors. The low one is this place, changed. The high one is somewhere else. Look at one to choose it.', 13000);
-      this.store.hints = n + 1; this.save();
-    } else this.hint('Two doors.', 6000);
+  // Say plainly which door is which, for as long as they stand open.
+  doorWords() {
+    const g = ENG.cur.g, k = g.door.kin, t = g.door.stranger, kin = ENG.cand[0];
+    const aside = Math.abs(k[0] - t[0]) > 2.5;
+    const kp = aside ? (k[0] < t[0] ? 'left' : 'right') : 'low', sp = aside ? (k[0] < t[0] ? 'right' : 'left') : 'high';
+    const how = kin && kin.g.changeType ? CHANGES[kin.g.changeType].label : 'changed';
+    return { kp, sp, how };
   },
-  chose(k) { this.hint(k === 0 ? 'Kin: this place, changed.' : 'A stranger: somewhere else.', 5000); },
+  doorsOpen() {
+    const d = this.doorWords(), n = this.store.hints || 0;
+    this.hint(`The ${d.kp} door: this place, ${d.how}. The ${d.sp} door: somewhere else.` + (n < 4 ? ' Look at one to choose it.' : ''), 0);
+    this.store.hints = n + 1; this.save();
+  },
+  chose(k) {
+    const d = this.doorWords();
+    this.hint(k === 0 ? `Taking the ${d.kp} door: this place, ${d.how}.` : `Taking the ${d.sp} door: somewhere else.`, 0);
+  },
 
   frame(dt) {
     this.idleT += dt;
     if (this.idleT > 4.5 && $('more').hidden) document.body.classList.add('idle');
-    if ($('b-stay').getAttribute('aria-pressed') === 'true' && !ENG.linger) { $('b-stay').setAttribute('aria-pressed', 'false'); this.toast('Going on.'); }
+    if ($('b-stay').getAttribute('aria-pressed') === 'true' && !ENG.linger) { $('b-stay').setAttribute('aria-pressed', 'false'); $('b-stay').textContent = 'Stay here'; this.toast('Going on.'); }
     if (!$('more').hidden && (ENG.frame & 31) === 0) this.stat();
     if (hasAudio && AUDIO.ready) {
       const D = ENG.doors, w = ENG.cur;

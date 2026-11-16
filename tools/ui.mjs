@@ -23,6 +23,9 @@ await page.screenshot({ path: path.join(out, '1-veil.png') });
 await page.click(opt('sound', '') ? '#go-sound' : '#go-quiet');
 await page.waitForTimeout(4500);
 await page.screenshot({ path: path.join(out, '2-plate.png') });
+// controls that have faded out take no taps: wake them first, as a person would
+if (W < 600) await page.touchscreen.tap(W / 2, H / 3); else await page.mouse.move(W / 2, H / 3);
+await page.waitForTimeout(250);
 await page.click('#b-more');
 await page.waitForTimeout(700);
 await page.screenshot({ path: path.join(out, '3-more.png') });
