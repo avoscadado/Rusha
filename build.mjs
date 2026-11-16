@@ -43,7 +43,7 @@ for (const k of worldKeys) {
   const banned = [/\btexture\s*\(/, /\bdFd[xy]\b/, /\bfwidth\b/, /fract\s*\(\s*sin/, /\bcontinue\b/, /\bswitch\b/, /\bwhile\b/];
   for (const b of banned) if (b.test(glsl[k])) throw new Error(`lint: ${k}.glsl uses ${b}`);
   for (const m of glsl[k].matchAll(/smoothstep\(\s*(-?[0-9.]+)\s*,\s*(-?[0-9.]+)\s*,/g)) {
-    if (+m[1] > +m[2]) console.warn(`lint: ${k}.glsl has smoothstep(${m[1]}, ${m[2]}, ..) with its edges reversed, which is undefined`);
+    if (+m[1] > +m[2]) throw new Error(`lint: ${k}.glsl has smoothstep(${m[1]}, ${m[2]}, ..) with its edges reversed, which is undefined`);
   }
   const calls = (glsl[k].match(/\bmap\s*\(/g) || []).length - (/float\s+map\s*\(/.test(glsl[k]) ? 1 : 0);
   if (k === 'z-main' && calls !== 3) throw new Error(`lint: z-main must call map() exactly 3 times, found ${calls}`);

@@ -24,8 +24,9 @@
 #define HCELL 72.0       // one hut at most in a square of this size
 #define HTALL 7.0        // nothing built stands higher than this above its shelf
 
-// gD, the distance z-main rules its grazing ink lines from, is set to the built things only (set piece, huts):
-// the shelves rule their own lips and creases in surf(), evenly, where a grazing test along a stepped hill would stutter.
+// gD, which z-main reads for grazing ink lines and for shadows, is the true distance to the built things (set
+// piece, huts) and otherwise large, except that it is 0 for a shadow ray inside the ground. The shelves rule their
+// own lips and creases in surf(), evenly, where a grazing test along a stepped hill would stutter.
 float gU;                // sideways distance from the flight line at the last rawG()
 vec3 gHq;                // the last hut, in its own frame: x downhill, y up from its floor, z along the shelf
 vec4 gHr;                // and its lattice randoms
@@ -77,8 +78,7 @@ float hutD(vec3 p, float lod, float within) {
   if (r.x > uTr[9]) return 1e5;
   vec2 ctr = (vec2(c) + 0.5 + (r.yz - 0.5) * 0.5) * HCELL;
   vec2 o = p.xz - ctr;
-  float bound = length(o) - 10.5;
-  if (bound > within) return bound;
+  if (length(o) - 10.5 > within) return 1e5;           // too far to matter: never a made-up small distance
   vec3 R = rawG(ctr);
   float j = floor(R.x / uTr[0]);
   if (j < 0.5 || R.x > 0.72 * uTr[1]) return 1e5;
@@ -160,7 +160,7 @@ float map(vec3 p) {
     float m = floor(p.y / Te), jn = m + 1.0;
     if (mod(jn, 2.0) > 0.5 && p.y - Te * m >= Te * (1.0 - sh.y)) jn += 1.0;
     d = jn < 0.5 ? A : max(A, (Te * jn - R.x) / max(g, 1e-5));
-    gD = sp;
+    gD = sun ? 0.0 : sp;                                // a shadow ray that has landed in the ground is in shadow
     return min(d, sp);
   }
   // outside: never more than the true distance to the stack
@@ -177,9 +177,10 @@ float map(vec3 p) {
     return min(d, sp);
   }
   float st = max(max(d, walk(p, R, sh, j0, 0.0)), openAir(p, u, 0.0));
-  // A shadow ray is in shadow when it lands inside the ground, and z-main also darkens it wherever the step
-  // returned is small beside the distance gone. Here a small step only means the bounds are cautious, so a
-  // shadow ray never takes less than a fraction of the way it has come: shadows are cut hard, as on a block.
+  // A shadow ray is in shadow when it lands inside the ground (gD = 0 above) and nowhere else: gD stays large in
+  // the open, because a small step here only means the bounds are cautious, not that anything is near. So that a
+  // ray which is blocked does land inside, instead of creeping up to the face for ever, a shadow ray never takes
+  // less than a fraction of the way it has come. Shadows are cut hard, as on a block.
   if (sun) st = max(st, max(gFree ? 0.8 * A : 0.0, 0.075 * length(p - gSunO)));
   if (huts) {
     if (sun) {
@@ -203,8 +204,9 @@ float map(vec3 p) {
 }
 
 // the tone z-main will print for a face whose normal makes this cosine with the sun, if nothing shades it
-float toneOf(float ndl) {
-  float nb = max(uSun.z, 1.0), x = smoothstep(-0.02, 0.5, ndl) * step(-0.02, uSunDir.y) * nb;
+// (level ground takes a very low sun; a wall the light only grazes is printed in shadow)
+float toneOf(float ndl, float ny) {
+  float nb = max(uSun.z, 1.0), x = smoothstep(mix(0.1, -0.02, smoothstep(0.5, 0.9, ny)), 0.5, ndl) * step(-0.02, uSunDir.y) * nb;
   return min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);
 }
 
@@ -257,7 +259,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   s.lit = mix(s.lit, mix(uInk[LOW], uInk[PAPER], 0.5), wet);
   s.shade = mix(s.shade, mix(uInk[LOW], uInk[SHADE], 0.28), wet);
   // what a level tread prints as when nothing shades it
-  vec3 as = mix(mix(s.shade, uInk[TOP], 0.22), s.lit, toneOf(uSunDir.y));
+  vec3 as = mix(mix(s.shade, uInk[TOP], 0.22), s.lit, toneOf(uSunDir.y, 1.0));
   if (!tread) {
     // the lip: every shelf shows its edge as one ruled line, however little of its tread can be seen;
     // a riser thinner than a pixel or two is printed as tread altogether
@@ -286,7 +288,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     float road = 1.0 - smoothstep(1.5, 1.5 + 1.5 * px, abs(u - 0.5 * fw));
     s.lit = mix(s.lit, mix(uInk[LIT], uInk[PAPER], 0.6), road); s.shade = mix(s.shade, mix(uInk[SHADE], uInk[PAPER], 0.3), road);
   }
-  vec3 ar = mix(rs.shade, rs.lit, toneOf(dot(-R.yz / g, uSunDir.xz)));
+  vec3 ar = mix(rs.shade, rs.lit, toneOf(dot(-R.yz / g, uSunDir.xz), 0.0));
   s.lit = mix(s.lit, ar, thin); s.shade = mix(s.shade, ar, thin);
   return s;
 }

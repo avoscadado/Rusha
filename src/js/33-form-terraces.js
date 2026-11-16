@@ -1,6 +1,6 @@
 // ---- TERRACES: hillsides cut into level shelves, a valley along the flight line ----
 FORMS.terraces = {
-  weight: 0,
+  weight: 1.1,
   // set pieces: half width in units of scale, and whether the way goes through
   SETW: { 1: [1.25, true], 2: [1.0, false], 3: [1.65, true], 4: [0.5, false], 5: [0.7, false], 6: [1.5, true], 7: [0.9, false], 8: [1.25, false] },
   // the hillside in profile: an S from 0 to 1 that leans toward the valley (the same curve as rawG in the shader)
@@ -21,9 +21,11 @@ FORMS.terraces = {
     const huts = r.chance(0.6) ? r.range(0.3, 0.75) : 0;
     g.speed = r.range(12, 18); g.lead = 90; g.focal = 2.0;
     const P = g.path;
-    P.ax = r.range(14, 55); P.fx = TAU / r.range(520, 900); P.px = r.range(0, TAU);
+    // the valley winds, and the line with it: the sway has its own stream
+    const sw = S('sway');
+    P.ax = sw.range(14, 55); P.fx = TAU / sw.range(520, 900); P.px = sw.range(0, TAU);
+    P.ay = sw.range(0, 1.5); P.fy = TAU / sw.range(300, 500); P.py = sw.range(0, TAU);
     P.y0 = Math.max(11, H * r.range(0.1, 0.4));
-    P.ay = r.range(0, 1.5); P.fy = TAU / r.range(300, 500); P.py = r.range(0, TAU);
     const doorR = 5.5;
     // one set piece on the valley floor, beside the line or across it; a narrow valley takes only the slim ones
     const rs = S('terraces set'), hasSet = rs.chance(0.36);
@@ -39,13 +41,13 @@ FORMS.terraces = {
     }
     // water: a lake on the valley floor, a sea of mist, or dry. It stays under the portals.
     const clear = P.y0 - P.ay - doorR - 1.5;
-    const water = r.weighted([['lake', 4], ['mist', 1.6], ['dry', 3]]);
+    const water = r.weighted([['lake', 4], ['mist', 1], ['dry', 3]]);
     let drowned = 0;
     if (water === 'lake') {
       drowned = r.chance(0.35) ? Math.max(0, Math.min(r.int(1, 2), Math.floor(clear / T - 0.6))) : 0;
       g.sea = [r.chance(0.7) ? 2 : 1, Math.min(T * (drowned + r.range(0.3, 0.6)), clear), r.range(0.4, 1), 0];
     } else if (water === 'mist') {
-      g.sea = [3, Math.min(T * r.range(1.4, 3.6), clear), 1, 0];
+      g.sea = [3, Math.min(T * r.range(1.3, 2.5), clear), 1, 0];
     }
     const dry = water === 'dry', level = dry ? 0 : g.sea[1];
     if (type === 3) P.y0 += level;

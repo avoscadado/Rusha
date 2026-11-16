@@ -66,7 +66,7 @@ float map(vec3 p) {
   if (r.x < uTr[4] || odd) {
     q.xz -= (r.yz - 0.5) * S * 0.42 * uTr[3] * (odd ? 0.0 : 1.0);
     // far things are drawn a little fatter, so they stay whole instead of breaking into specks
-    d = min(d, thing(q, kind, H, W, r, odd) - min(0.8 * uPix * away, 0.8 * W));
+    d = min(d, thing(q, kind, H, W, r, odd) - min(0.8 * uPix * away, 0.8 * W) * lod);   // (and thinner again as they sink)
   }
   gD = d;
   return min(d, ex);

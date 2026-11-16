@@ -114,7 +114,7 @@ float hazeStep(float t) {
   return mix(h, stepped, smoothstep(0.18, 0.45, h));
 }
 
-vec3 calcN(vec3 p, float h, out float cav) {
+vec3 calcN(vec3 p, float h, float d0, out float cav) {
   vec3 n = vec3(0.0); float s = 0.0;
   gRd = vec3(0.0);
   for (int i = uZero; i < 4; i++) {
@@ -122,7 +122,9 @@ vec3 calcN(vec3 p, float h, out float cav) {
     float d = map(p + e * h);                              // map call site 2 of 3
     n += e * d; s += d;
   }
-  cav = s / (4.0 * h);                                     // > 0 on ridges, < 0 in creases
+  // > 0 on ridges, < 0 in creases. The march stops a little short of the surface; taking that
+  // distance off leaves flat faces at exactly zero, with no grain
+  cav = (s * 0.25 - d0) / h;
   return normalize(n + vec3(0.0, 1e-7, 0.0));
 }
 
@@ -170,14 +172,14 @@ void main() {
       if (tp > 0.0 && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }
     }
     // the march
-    float t = tMin, pd = 1e9, edge = 0.0; bool hit = false, spent = true;
+    float t = tMin, pd = 1e9, edge = 0.0, dHit = 0.0; bool hit = false, spent = true;
     gRd = rd;
     float jit = 0.6 + 0.4 * ign(fc + float(b) * 17.0);
     for (int i = uZero; i < 200; i++) {
       if (i >= nSteps) break;
       float d = map(ro + rd * t);                          // map call site 1 of 3
       cost += 1.0;
-      if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; break; }
+      if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; dHit = d; break; }
       if (gD > pd && pd < 1.2 * uPix * t) edge = max(edge, exp(-t * uAir.x * 7.0));   // grazed something near: an ink line
       pd = gD;
       t += d * STEPK * (i == 0 ? jit : 1.0);
@@ -189,7 +191,7 @@ void main() {
       if (b == 0) tFirst = t;
     } else if (hit && t < tMax) {
       vec3 p = ro + rd * t;
-      float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);
+      float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), dHit, cav);
       n -= max(0.0, dot(n, rd)) * rd; n = normalize(n - 1e-5 * rd);
       Surf s = surf(p, n, t);
       if (uEv.z > 0.001) {                                  // snow lies on whatever faces up

@@ -22,7 +22,7 @@ FORMS.stair = {
     g.sky[3] = 0;
     // the light comes over one wall and falls across the other
     g.sunAz = (r.chance(0.5) ? 1 : -1) * r.range(0.55, 1.1); g.sunEl = Math.max(g.sunEl, r.range(0.32, 0.6));
-    g.fill = [-Math.sign(g.sunAz) * 0.7, 0.6, -0.3, 0.8];
+    g.fill = [-Math.sign(g.sunAz) * 0.7, 0.6, -0.3, 0.8]; g.elMin = 0.32;
     g.timbres = ['bell', 'glass', 'organ']; g.space = 0.8;
     g.pulse = frames || P * 2; g.floodTo = RH * 2.15; g.mistTop = RH * 1.6;
     const top = N * RH, rad = Math.min(half * 0.6, 4.2) - 0.5;

@@ -1,7 +1,7 @@
 // ---- VIADUCT: arches that cross nothing, from one horizon to the other ----
 // The datum is y = 0: the water, the mist or the ground the piers stand in.
 FORMS.viaduct = {
-  weight: 0,
+  weight: 1.1,
   build(g, S) {
     // each group of traits has its own stream, so one can grow without disturbing the others
     const r = S('viaduct'), rd = S('viaduct.detail'), ro = S('viaduct.odd'), rv = S('viaduct.view'), rl = S('viaduct.light'), re = S('viaduct.event');
@@ -131,7 +131,8 @@ FORMS.viaduct = {
     if (hour === 1) g.sunEl = rl.range(0.075, 0.17);
     if (hour === 2) g.sunEl = rl.range(0.36, 0.72);
     if (under === 'dry' && g.sunEl < 0.135) g.sunEl = rl.range(0.135, 0.19);   // enough to print shadows on level ground
-    if (lay === 2) g.sunEl = Math.min(g.sunEl, 0.5);
+    if (lay === 2) { g.sunEl = Math.min(g.sunEl, 0.5); g.elMax = 0.5; }
+    if (under === 'dry') g.elMin = 0.135;
     g.sun[3] = 60;                                               // shadows are cut, not airbrushed
     g.fill = through ? [-sunSide, 0.3, -0.15, 1] : [0.1 * sunSide, 0.25, -1, 0.8];
     f.through = through;
@@ -160,7 +161,7 @@ FORMS.viaduct = {
     const nothing = [two ? 'They cross nothing.' : 'It crosses nothing.',
       f.under === 'mist' ? 'The mist stands where a river would.' : f.under === 'dry' ? `The ground under ${two ? 'them' : 'it'} is level and dry.` : `The water under ${two ? 'them' : 'it'} does not go anywhere.`];
     const odd = { 1: ['One span is down.', 'The others have not moved.'], 2: ['One pier has been painted as high as a ladder reaches.', 'Nobody has painted the next.'], 3: ['One arch has been walled up, with a door in the wall.'] }[f.ex];
-    const then = f.mist === 'in' ? 'The mist comes in while you are here and gives it a river.'
+    const then = f.mist === 'in' ? `The mist comes in while you are here and gives ${f.lay === 1 ? 'them' : 'it'} a river.`
       : f.mist === 'up' ? 'The mist is rising up the piers.'
       : f.mist === 'down' ? 'The mist is going out, and the piers are longer than they looked.'
       : f.tide === 'down' ? 'The water goes down while you are here and leaves a dark line on every pier.'

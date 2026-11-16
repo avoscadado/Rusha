@@ -179,9 +179,13 @@ const WORLD = {
     }
     pool = pool.filter((p) => p !== g.pal);
     g.pal = r.pick(pool.length ? pool : PALETTES);
-    const keepSky = g.sky[3];
+    const keepSky = g.sky[3], keep = { az: g.sunAz, el: g.sunEl, fill: g.fill.slice() };
     WORLD.light(g, stream(change, 'light'));
-    g.sky[3] = keepSky;                                    // the far country does not move
+    g.sky[3] = keepSky;                                    // the far country does not move,
+    // and the light keeps to the side of the place it was designed for
+    g.sunAz = keep.az;
+    g.fill = [keep.fill[0], keep.fill[1], keep.fill[2], Math.max(keep.fill[3], g.fill[3])];
+    g.sunEl = g.elFix ? keep.el : clamp(g.sunEl, g.elMin ?? -1, g.elMax ?? 2);
     if (type === 'flooded') { g.sea = [r.chance(0.5) ? 2 : 1, g.floodTo, r.range(0.5, 1), 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
     else if (type === 'drained') { g.sea = [0, 0, 0, 0]; if (g.ev.type === 'tide') g.ev.type = 'none'; }
     else if (type === 'mist') { g.air[2] = g.mistTop; g.air[3] = 0.022; if (g.ev.type === 'mist') g.ev.type = 'none'; }
