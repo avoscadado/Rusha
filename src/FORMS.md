@@ -37,6 +37,9 @@ Rules you must keep yourself:
   Prefer arithmetic: `mod`, `stairs()`, sums of sines, boxes.
 - Never return more than the true distance. If cells differ from their neighbours, step with `cellExit()`
   (see plain) and set `gD` to the distance without that step, so ink lines stay on real edges.
+- `gD` must be the distance to real surfaces. If `map()` takes a shortcut ("this point is above everything, step
+  down to the roofline"), return the safe step but set `gD` to something large: shadows and ink lines read `gD`,
+  and a made-up small value there draws false shadows.
 - Far small things must sink or thin out before they are thinner than a pixel (see the `lod` line in plain).
 - The flight line is `pathXY(z)` for every z from -50 to 60000. A tube of at least 2.5 m around it must be empty,
   and so must the two portals: discs of radius `g.door.r` facing +z, centred on the line plus `g.door.kin` and

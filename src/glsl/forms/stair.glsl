@@ -21,7 +21,7 @@ float map(vec3 p) {
   float W0 = uTr[0], D = uTr[1], RH = uTr[2], N = uTr[3], Bn = uTr[13];
   float M = N + Bn, base = -Bn * RH, top = N * RH;
   float d;
-  if (p.y > top + 9.0) { d = p.y - top - 8.0; gD = d; return d; }
+  if (p.y > top + 9.0) { gD = 1e3; return p.y - top - 8.0; }   // a safe step; no surface is near
   float ax = abs(p.x), u = ax - W0;
   float i = clamp(floor(u / D), -1.0, M - 1.0);
   // the level underfoot and the one that rises ahead

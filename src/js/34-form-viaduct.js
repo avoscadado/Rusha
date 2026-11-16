@@ -15,7 +15,7 @@ FORMS.viaduct = {
     const pw = Math.max(2, bay * r.range(0.085, 0.135));
     const a = bay / 2 - pw;
     const k = r.chance(0.3) ? r.range(1.22, 1.45) : 1;
-    const rise = k * a, band = r.range(1.9, 3.4);
+    const rise = k * a, band = r.range(2.4, 4.4) + 0.12 * a;
     // an arcade of small arches along the top, as an aqueduct has
     let nUp = lay === 2 ? 0 : r.weighted([[0, 4.5], [2, 1.2], [3, 2], [4, 1.5]]), hT = 0;
     if (nUp) {
@@ -56,7 +56,7 @@ FORMS.viaduct = {
     } else {
       X0 = gap + w + 0.25;
       doorR = 4.2;
-      P.ax = Math.min(X0 - reach - doorR - 2.5, rv.range(2, 6));
+      P.ax = Math.min(0.3 * (X0 - reach), rv.range(1.5, 4.5));
       P.fx = TAU / rv.range(500, 900); P.px = rv.range(0, TAU);
     }
     if (view === 'low') { P.y0 = rv.range(5.5, 10); P.ay = rv.range(0, 1.2); P.fy = TAU / rv.range(500, 900); g.tilt = rv.range(0.06, 0.13); g.focal = 1.8; }
@@ -111,7 +111,7 @@ FORMS.viaduct = {
     // ---- the one exception, where the flight will pass it ----
     const loud = g.ev.type === 'lights' || f.mist === 'in';
     const ex = r.weighted([[0, loud ? 6 : 2.2], [1, 3.2], [2, 2], [3, 1.8]]);
-    const oz = Math.max(2, Math.round((g.speed * r.range(15, 21)) / bay));
+    const oz = Math.max(2, Math.round((g.speed * r.range(17, 22)) / bay));
     f.ex = ex;
 
     // ---- portals: both hang in clear air on the open side, above whatever the datum does ----
@@ -122,7 +122,7 @@ FORMS.viaduct = {
     g.door = { r: doorR, kin: [0, kinY], stranger };
 
     // ---- light: the sun either rakes the face from the open side or comes through the arches ----
-    const through = lay === 2 ? true : rl.chance(0.5);
+    const through = lay === 2 ? true : rl.chance(under === 'dry' ? 0.75 : 0.5);
     const sunSide = lay === 0 ? (through ? side : -side) : (rl.chance(0.5) ? 1 : -1);
     const az = hour === 1 ? rl.range(0.3, 0.72) : hour === 2 ? rl.range(0.5, 1.1) : rl.range(0.32, 0.9);
     g.sunAz = sunSide * az;
@@ -131,13 +131,12 @@ FORMS.viaduct = {
     if (under === 'dry' && g.sunEl < 0.135) g.sunEl = rl.range(0.135, 0.19);   // enough to print shadows on level ground
     if (lay === 2) g.sunEl = Math.min(g.sunEl, 0.5);
     g.fill = through ? [-sunSide, 0.3, -0.15, 1] : [0.1 * sunSide, 0.25, -1, 0.8];
-    const shafts = lay === 2 && hour !== 0 && rl.chance(0.7);
     f.through = through;
     g.air = [lay === 2 ? rl.range(0.0022, 0.003) : rl.range(0.0013, 0.0021), rl.int(5, 8), -100, 0];
     if (lay === 2) g.sky[3] = 0;
 
     g.tr.set([bay, Hm, T, N + 10 * nUp, pw, w, k, hs, hT, lay === 0 ? side * X0 : X0, lay, floor,
-      ex, ex ? oz * (lay === 1 ? exSide : 1) : 0, 0, (lamps ? 1 : 0) + (pil ? 4 : 0) + (open ? 8 : 0) + (shafts ? 16 : 0)]);
+      ex, ex ? oz * (lay === 1 ? exSide : 1) : 0, 0, (lamps ? 1 : 0) + (pil ? 4 : 0) + (open ? 8 : 0)]);
     g.pulse = bay;
     g.timbres = ['bowed', 'bell', 'organ'];
     g.space = lay === 2 ? 0.9 : 0.75;
@@ -155,7 +154,7 @@ FORMS.viaduct = {
     else if (f.view === 'deck') first = `The deck is ${H} metres up and has a pier under it every ${bay} metres.`;
     else first = `Piers ${H} metres high carry arches ${span} metres wide from one horizon to the other.`;
     const nothing = ['It crosses nothing.', f.under === 'mist' ? 'The mist stands where a river would.' : f.under === 'dry' ? 'The ground under it is level and dry.' : 'The water under it is standing water.'];
-    const odd = { 1: ['One span is down.', 'The others have not moved.'], 2: ['One pier has been painted.', 'Nobody has painted the next.'], 3: ['One arch has been walled up, with a door in the wall.'] }[f.ex];
+    const odd = { 1: ['One span is down.', 'The others have not moved.'], 2: ['One pier has been painted as high as a ladder reaches.', 'Nobody has painted the next.'], 3: ['One arch has been walled up, with a door in the wall.'] }[f.ex];
     const then = f.mist === 'in' ? 'The mist comes in while you are here and gives it a river.'
       : f.mist === 'up' ? 'The mist is rising up the piers.'
       : f.mist === 'down' ? 'The mist is going out, and the piers are longer than they looked.'

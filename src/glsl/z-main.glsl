@@ -201,7 +201,8 @@ void main() {
           cost += 1.0;
           // real surfaces only (a cell wall casts no shadow); the closest approach is estimated
           // from this sample and the last, which keeps penumbras free of contour lines
-          float y = gD * gD / (2.0 * ph), dd = sqrt(max(gD * gD - y * y, 0.0));
+          // (only while the distance is changing smoothly: across a cell wall it can jump)
+          float y = gD < 1.8 * ph ? gD * gD / (2.0 * ph) : 0.0, dd = sqrt(max(gD * gD - y * y, 0.0));
           sh = min(sh, uSun.w * dd / max(st - y, 1e-3));
           ph = gD;
           st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
@@ -209,7 +210,9 @@ void main() {
         }
         sh = smoothstep(0.25, 0.6, sh);
       }
-      float key = smoothstep(-0.02, 0.5, ndl) * sh;
+      // level ground takes even a very low sun; a wall the light only grazes is printed in shadow,
+      // which keeps ragged grazing shadows off it
+      float key = smoothstep(mix(0.1, -0.02, smoothstep(0.5, 0.9, n.y)), 0.5, ndl) * sh;
       float nb = max(uSun.z, 1.0), x = key * nb;
       float tone = min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);
       // the fill light can lift a surface by one band at most, and never casts a shadow

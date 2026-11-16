@@ -16,6 +16,7 @@ FORMS.terraces = {
     const lean = r.range(0, 1.8);
     const spur = r.chance(0.8) ? r.range(25, 90) : 0, ks = TAU / r.range(150, 320);
     const wet = r.weighted([[0, 3], [1, 3.5], [0.5, 2.5]]);
+    const huts = r.chance(0.6) ? r.range(0.3, 0.75) : 0;
     g.speed = r.range(12, 18); g.lead = 90; g.focal = 2.0;
     g.path.ax = r.range(14, 55); g.path.fx = TAU / r.range(520, 900); g.path.px = r.range(0, TAU);
     g.path.y0 = Math.max(9, H * r.range(0.1, 0.5));
@@ -31,7 +32,7 @@ FORMS.terraces = {
     const ds = (Math.hypot(1, ps + 0.5 * spur * ks) + cove * nG) / run, hs = (g.path.ax * g.path.fx * g.path.fx + 0.5 * spur * ks * ks + cove * nH) / run;
     const G = H * (p1 * ds + c1 * nG);
     const C = H * (p2 * ds * ds + p1 * hs + 2 * p1 * c1 * ds * nG + c1 * nH);
-    g.tr.set([T, H, W, cove, run, K, lean, c1, wet, 0, 1 / Math.hypot(1, G), C, ks, 0, r.pick([0, 1, 1]), spur]);
+    g.tr.set([T, H, W, cove, run, K, lean, c1, wet, huts, 1 / Math.hypot(1, G), C, ks, 0, r.pick([0, 1, 1]), spur]);
     const shelves = Math.round((0.9 * H) / T);
     // water: a lake on the valley floor, a sea of mist, or dry
     const doorR = 5.5, clear = g.path.y0 - g.path.ay - doorR - 2;
@@ -67,8 +68,9 @@ FORMS.terraces = {
       g.facts.setM = Math.round(SETS[type].tall * scale);
       if (g.sea[0] > 0.5) g.sea[1] = Math.min(g.sea[1], g.path.y0 - doorR - 2);
     } else {
-      const pick = r.weighted([['none', 3], ['mist', dry ? 2.5 : 0.8], ['snow', 1.6], ['tide', water === 'lake' ? 3 : 0], ['sunset', g.pal.hour === 1 ? 4 : 0]]);
+      const pick = r.weighted([['none', 3], ['lights', huts && g.pal.hour !== 2 ? 4 : 0], ['mist', dry ? 2.5 : 0.8], ['snow', 1.6], ['tide', water === 'lake' ? 3 : 0], ['sunset', g.pal.hour === 1 ? 4 : 0]]);
       if (pick === 'mist' && water !== 'mist') g.ev = { id: 3, type: 'mist', t0: 12, dur: 24 };
+      else if (pick === 'lights') g.ev = { id: 2, type: 'lights', t0: 8, dur: 30 };
       else if (pick === 'snow') g.ev = { id: 4, type: 'snow', t0: 10, dur: 22 };
       else if (pick === 'sunset') g.ev = { id: 5, type: 'sunset', t0: 8, dur: 34, toPal: r.pick(['Lamp Black', 'Indigo Vat', 'Mulberry Night', 'Prussian']) };
       else if (pick === 'tide') {

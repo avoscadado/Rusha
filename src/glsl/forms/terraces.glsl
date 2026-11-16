@@ -27,6 +27,7 @@
 float gU;                // sideways distance from the flight line at the last rawG()
 vec3 gHq;                // the last hut, in its own frame: x downhill, y up from its floor, z along the shelf
 vec4 gHr;                // and its lattice randoms
+bool gFree;              // the last walk() met nothing
 
 // the smooth height before it is cut into shelves, and its gradient
 vec3 rawG(vec2 x) {
@@ -89,33 +90,47 @@ float hutD(vec3 p, float lod, float within) {
 }
 
 // Along the ray gRd from p: how far to the first riser or tread it can meet, looking
-// three shelves ahead. With clear > 0 it stops that far above a tread instead.
+// four shelves ahead. With clear > 0 it stops that far above a tread instead.
 float walk(vec3 p, vec3 R, vec3 sh, float j0, float clear) {
   float c2 = 0.5 * uTr[11] * dot(gRd.xz, gRd.xz);
   float rp = dot(R.yz, gRd.xz);
-  float s0 = 0.0, st = 0.0, jb = j0;
-  for (int k = uZero; k < 3; k++) {
+  float s0 = 0.0, jb = j0;
+  gFree = false;
+  for (int k = uZero; k < 4; k++) {
     float top = topOf(jb, sh) + clear;
-    if (p.y + gRd.y * s0 < top) { st = s0; break; }               // it meets this riser
+    if (p.y + gRd.y * s0 < top) return s0;                         // it meets this riser
     float dl = sh.x * (jb + 1.0) - R.x;
     float s1 = 2.0 * dl / max(rp + sqrt(rp * rp + 4.0 * c2 * dl), 1e-6);
     if (gRd.y < 0.0) {
       float sq = (p.y - top) / -gRd.y;
-      if (sq < s1) { st = sq; break; }                             // it lands on this tread
+      if (sq < s1) return sq;                                      // it lands on this tread
     }
-    s0 = s1; st = s1; jb += 1.0;
+    s0 = s1; jb += 1.0;
   }
-  return st;
+  gFree = true;
+  return s0;
 }
-// In the open air of the valley: no hill stands higher than the envelope H * P((|u| - W) / run).
+// No hill stands higher than the envelope H * P((|u| - W) / run): how far from the line a hill can reach this height.
+float reach(float y) {
+  if (y >= uTr[1]) return 1e5;
+  float bn = 0.5 - sin(asin(1.0 - 2.0 * y / uTr[1]) / 3.0);
+  return uTr[2] + uTr[4] * bn / (1.0 + uTr[6] * (1.0 - bn));
+}
+// In the open air of the valley: how far the ray gRd can go before it could be under that envelope.
 float openAir(vec3 p, float u, float clear) {
-  float Hm = uTr[1];
-  float yr = (gRd.y < 0.0 ? 0.6 * p.y : p.y) - clear;
-  if (yr <= 0.0) return 0.0;
-  float bn = 0.5 - sin(asin(1.0 - 2.0 * min(yr / Hm, 1.0)) / 3.0);
-  float need = yr >= Hm ? 1e5 : uTr[2] + uTr[4] * bn / (1.0 + uTr[6] * (1.0 - bn));
-  float se = (need - abs(u)) / max(abs(gRd.x) + abs(uPathA.x * uPathA.y * gRd.z), 1e-4);
-  if (gRd.y < 0.0) se = min(se, 0.4 * p.y / -gRd.y);
+  float lat = max(abs(gRd.x) + abs(uPathA.x * uPathA.y * gRd.z), 1e-4);
+  float se = 0.0;
+  if (gRd.y < 0.0) {
+    float y = 0.6 * p.y - clear;
+    if (y > 0.0) se = min((reach(y) - abs(u)) / lat, 0.4 * p.y / -gRd.y);
+  } else {
+    // a rising ray clears more of the hill the further it goes
+    for (int i = uZero; i < 3; i++) {
+      float y = p.y + gRd.y * se - clear;
+      if (y <= 0.0) break;
+      se = max(se, (reach(y) - abs(u)) / lat);
+    }
+  }
   return se;
 }
 
@@ -150,24 +165,30 @@ float map(vec3 p) {
     gD = min(d, sp);
     return gD;
   }
-  float dh = 1e5, st;
+  float st = max(max(d, walk(p, R, sh, j0, 0.0)), openAir(p, u, 0.0));
+  bool sun = gRd == uSunDir;
+  // A shadow ray that has nothing in front of it may go as far as it is above the ground: landing inside a
+  // hill is as good as meeting it, and the ray is not then taken to be grazing something it is nowhere near.
+  if (sun && gFree) st = max(st, 0.8 * A);
   if (huts) {
+    if (sun) {
+      // a shadow ray: a hut shades its own cell and no further, so that no step here is cut short by a cell wall
+      st = min(st, hutD(p, sh.z, st));
+      gD = min(st, sp);
+      return gD;
+    }
     // near the ground a hut may stand in the way: go cell by cell there, and stay clear of it from above
-    st = walk(p, R, sh, j0, HTALL);
-    if (A < HTALL + 1.5 || st < 1.0) {
+    float sc = walk(p, R, sh, j0, HTALL);
+    if (A < HTALL + 1.5 || sc < 1.0) {
       vec2 q = p.xz - (floor(p.xz / HCELL) + 0.5) * HCELL;
-      dh = min(hutD(p, sh.z, 1e5), cellExit(q, HCELL));
-      st = max(max(d, walk(p, R, sh, j0, 0.0)), openAir(p, u, 0.0));
+      float dh = min(hutD(p, sh.z, st), cellExit(q, HCELL));
       gD = min(min(d, dh), sp);
       return min(min(st, dh), sp);
     }
-    d -= HTALL;
-    st = max(st, openAir(p, u, HTALL));
-  } else {
-    st = max(walk(p, R, sh, j0, 0.0), openAir(p, u, 0.0));
+    st = max(max(d - HTALL, sc), openAir(p, u, HTALL));
   }
   gD = min(d, sp);
-  return min(max(d, st), sp);
+  return min(st, sp);
 }
 
 // the tone z-main will print for a face whose normal makes this cosine with the sun, if nothing shades it
@@ -234,7 +255,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     rs.lit = mix(rs.lit, as, lip); rs.shade = mix(rs.shade, as, lip); rs.line *= 1.0 - lip;
     return rs;
   }
-  // a tread seen so nearly edge on that it is a sliver joins that line
+  // a tread seen so nearly edge on that it is a sliver is printed as the riser behind it: the lip line stays clean
   float thin = floor0 ? 0.0 : 1.0 - smoothstep(0.8, 2.0, Te / g * abs(view.y) / px);
   // the bund: a darker line along the outer edge of each tread, and across it between fields
   float w = max(0.5, 1.2 * px);
@@ -249,6 +270,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     float road = 1.0 - smoothstep(1.5, 1.5 + 1.5 * px, abs(u - 0.5 * fw));
     s.lit = mix(s.lit, mix(uInk[LIT], uInk[PAPER], 0.6), road); s.shade = mix(s.shade, mix(uInk[SHADE], uInk[PAPER], 0.3), road);
   }
-  s.lit = mix(s.lit, as, thin); s.shade = mix(s.shade, as, thin); s.line *= 1.0 - thin;
+  vec3 ar = mix(rs.shade, rs.lit, toneOf(dot(-R.yz / g, uSunDir.xz)));
+  s.lit = mix(s.lit, ar, thin); s.shade = mix(s.shade, ar, thin); s.line *= 1.0 - thin;
   return s;
 }

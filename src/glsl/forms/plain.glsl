@@ -57,7 +57,7 @@ float map(vec3 p) {
   if (lod < 0.01) return d;
   H *= lod;
   float top = H * 2.5 + 2.0;
-  if (p.y > top) { d = min(d, p.y - top + 1.0); gD = d; return d; }
+  if (p.y > top) { gD = d; return min(d, p.y - top + 1.0); }   // above everything: a safe step, but no surface is near
   ivec2 c = ivec2(floor(p.xz / S));
   vec4 r = cell4(c);
   vec3 q = vec3(p.x - (float(c.x) + 0.5) * S, p.y, p.z - (float(c.y) + 0.5) * S);

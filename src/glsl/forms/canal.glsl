@@ -37,7 +37,7 @@ float map(vec3 p) {
   vec2 q2 = vec2(Wc - ax, p.y - 1.0);                        // the quays
   d = min(d, length(max(q2, 0.0)) + min(max(q2.x, q2.y), 0.0));
   float roofs = (uTr[2] + uTr[3]) * 1.8 + 2.0;                // nothing stands higher than this
-  if (p.y > roofs + 1.0) { d = p.y - roofs; gD = d; return d; }
+  if (p.y > roofs + 1.0) { gD = 1e3; return p.y - roofs; }    // a safe step; no surface is near, so no shadow or ink line
   float cz = floor(p.z / B), qz = p.z - (cz + 0.5) * B;
   vec4 r = house(cz, side);
   float h = houseH(cz, side, r);
