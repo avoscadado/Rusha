@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kin and Stranger</title>
+<meta name="description" content="A slow flight through generated places, printed in eight inks. Every place ends in two doors: one to the same place, changed, and one to somewhere else.">
+<meta name="theme-color" content="#101018">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23f6ead2'/%3E%3Ccircle cx='12' cy='17' r='7' fill='%231d2b5a'/%3E%3Ccircle cx='22' cy='12' r='4.5' fill='%23e23d28'/%3E%3C/svg%3E">
+<style>
+:root { --paper: #f4ecdc; --ink: #1c1b22; --soft: rgba(28,27,34,.55); --accent: #e23d28; --mat: clamp(10px, 2.4vmin, 34px); }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--paper); color: var(--ink); overflow: hidden; }
+body { font: 15px/1.45 "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif; -webkit-font-smoothing: antialiased; transition: background-color 2.4s ease, color 2.4s ease; }
+#sheet { position: fixed; inset: 0; display: flex; flex-direction: column; padding: var(--mat); padding-top: max(var(--mat), env(safe-area-inset-top)); }
+#plate { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; background: #111; }
+#view { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#caption { flex: 0 0 auto; padding: calc(var(--mat) * .6) 2px 0; min-height: 4.6em; }
+#cap-no { font: 600 10.5px/1 ui-sans-serif, system-ui, "Helvetica Neue", Arial, sans-serif; letter-spacing: .22em; text-transform: uppercase; color: var(--soft); }
+#cap-name { margin: .35em 0 .1em; font-size: clamp(19px, 2.3vw, 30px); font-weight: 400; letter-spacing: .01em; line-height: 1.15; }
+#cap-line { margin: 0; max-width: 62ch; font-size: clamp(14px, 1.25vw, 17px); color: var(--ink); }
+#cap-from { margin: .25em 0 0; font-style: italic; font-size: 13px; color: var(--soft); }
+#veil { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: var(--paper); transition: opacity 1.6s ease; z-index: 20; }
+#veil.gone { opacity: 0; pointer-events: none; }
+#veil-title { font-size: clamp(28px, 5vw, 60px); letter-spacing: .02em; }
+#veil-sub { margin-top: .6em; font: 600 11px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .24em; text-transform: uppercase; color: var(--soft); text-align: center; }
+body.bleed { --mat: 0px; }
+body.bleed #caption { position: fixed; left: 0; bottom: 0; padding: 18px 22px; color: #fff; text-shadow: 0 1px 12px rgba(0,0,0,.6); }
+
+</style>
+</head>
+<body>
+<!-- GENERATED FILE. Edit the sources in src/ and run: node build.mjs -->
+<main id="sheet">
+  <div id="plate"><canvas id="view" aria-label="The current place"></canvas></div>
+  <footer id="caption" aria-live="polite">
+    <div id="cap-no"></div>
+    <h1 id="cap-name"></h1>
+    <p id="cap-line"></p>
+    <p id="cap-from"></p>
+  </footer>
+</main>
+<div id="veil"><div id="veil-in"><div id="veil-title">Kin and Stranger</div><div id="veil-sub">mixing the inks</div></div></div>
+<script>
+(function () {
+const GLSL = {"a-head":"uniform sampler2D uNoise;\nuniform sampler2D uPortTex0;\nuniform sampler2D uPortTex1;\nuniform vec2 uRes;\nuniform vec3 uCamP, uCamR, uCamU, uCamF;\nuniform float uPix;\nuniform float uTime;\nuniform int uZero;\nuniform vec3 uInk[8];\nuniform vec3 uSunDir;\nuniform vec4 uSun;\nuniform vec4 uAir;\nuniform vec4 uSea;\nuniform vec4 uPathA;\nuniform vec4 uPathB;\nuniform float uTr[16];\nuniform vec4 uSet;\nuniform vec4 uSetK;\nuniform vec4 uEv;\nuniform vec4 uSky;\nuniform vec4 uBody[2];\nuniform vec4 uBodyK[2];\nuniform vec4 uPart;\nuniform vec4 uClip;\nuniform float uClipOn;\nuniform vec4 uPortC[2];\nuniform vec4 uPortN[2];\nuniform vec3 uPortInk[2];\nuniform vec4 uQ;\n#define TOP 0\n#define LOW 1\n#define GLOW 2\n#define LIT 3\n#define SHADE 4\n#define DEEP 5\n#define PAPER 6\n#define ACCENT 7\nfloat gD;\nvec3 gRd;\nfloat cellExit(vec2 q, float S) {\n  vec2 inv = 1.0 / max(abs(gRd.xz), vec2(1e-4));\n  vec2 tw = (S * 0.5 - q * sign(gRd.xz)) * inv;\n  return min(tw.x, tw.y) + 0.02 * S;\n}\nstruct Surf { vec3 lit; vec3 shade; float glow; float line; };\nvec4 cell4(ivec2 c) { return texelFetch(uNoise, c & 255, 0); }\nfloat cell1(ivec2 c) { return texelFetch(uNoise, c & 255, 0).r; }\nfloat vnoise(vec2 x) {\n  vec2 i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  ivec2 c = ivec2(i);\n  float a = cell1(c), b = cell1(c + ivec2(1, 0)), d = cell1(c + ivec2(0, 1)), e = cell1(c + ivec2(1, 1));\n  return mix(mix(a, b, f.x), mix(d, e, f.x), f.y);\n}\nfloat vnoise1(float x) {\n  float i = floor(x), f = fract(x);\n  f = f * f * (3.0 - 2.0 * f);\n  int c = int(i);\n  return mix(cell1(ivec2(c, 71)), cell1(ivec2(c + 1, 71)), f);\n}\nfloat vnoise2(vec2 x) {\n  return 0.65 * vnoise(x) + 0.35 * vnoise(mat2(1.6, 1.2, -1.2, 1.6) * x + 31.7);\n}\nfloat ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }\nmat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }\nfloat sdBox(vec3 p, vec3 b) { vec3 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0); }\nfloat sdBox2(vec2 p, vec2 b) { vec2 q = abs(p) - b; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0); }\nfloat sdCyl(vec3 p, float r, float h) { vec2 d = vec2(length(p.xz) - r, abs(p.y) - h); return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)); }\nfloat sdTorus(vec3 p, float R, float r) { return length(vec2(length(p.xy) - R, p.z)) - r; }\nfloat sdSeg(vec3 p, vec3 a, vec3 b, float r) { vec3 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)) - r; }\nfloat stairs(float x, float s) { float k = x / s; return s * (floor(k) + smoothstep(0.0, 0.08, fract(k))); }\nvec2 pathXY(float z) {\n  return vec2(uPathA.x * sin(z * uPathA.y + uPathA.z),\n              uPathB.z + uPathA.w * sin(z * uPathB.x + uPathB.y));\n}\nfloat setRaw(vec3 q, float kind, float motion) {\n  float d = 1e5;\n  if (kind < 1.5) {\n    float frame = max(sdBox(q - vec3(0.0, 2.0, 0.0), vec3(1.25, 2.0, 0.16)), -sdBox(q - vec3(0.0, 1.8, 0.0), vec3(0.8, 1.8, 0.5)));\n    vec3 l = q - vec3(-0.8, 1.8, 0.0);\n    l.xz = rot(-1.9 * motion) * l.xz;\n    d = min(frame, sdBox(l - vec3(0.8, 0.0, 0.0), vec3(0.78, 1.78, 0.045)));\n  } else if (kind < 2.5) {\n    d = length(q - vec3(0.0, 1.0 + 2.4 * motion, 0.0)) - 1.0;\n  } else if (kind < 3.5) {\n    vec3 r = q - vec3(0.0, 1.55, 0.0);\n    d = sdTorus(r, 1.5, 0.11);\n  } else if (kind < 4.5) {\n    float taper = 0.42 - 0.035 * q.y;\n    d = max(sdBox2(q.xz, vec2(taper)), abs(q.y - 3.0) - 3.0);\n    d = min(d, sdBox(q - vec3(0.0, 6.15, 0.0), vec3(0.34, 0.15, 0.34)));\n    d = max(d, -sdBox(q - vec3(0.0, 5.3, 0.0), vec3(0.08, 0.14, 1.0)));\n  } else if (kind < 5.5) {\n    float tread = q.y - stairs(q.z + 3.0, 0.25) * 0.72;\n    d = max(max(tread * 0.7, abs(q.x) - 0.6), max(abs(q.z) - 3.0, -q.y - 0.2));\n    d = max(d, -(q.y - (q.z + 3.0) * 0.72 + 0.55) * 0.7);\n  } else if (kind < 6.5) {\n    vec3 a = q - vec3(0.0, 1.6, 0.0);\n    float outer = max(sdBox(a, vec3(1.5, 1.6, 0.34)), -a.y - 1.6);\n    float hole = min(length(a.xy - vec2(0.0, 0.5)) - 1.0, sdBox2(a.xy - vec2(0.0, -0.6), vec2(1.0, 1.1)));\n    d = max(outer, -hole);\n  } else if (kind < 7.5) {\n    vec3 s = q - vec3(0.0, 1.6 + 0.5 * motion, 0.0);\n    s.xy = rot(0.22) * s.xy;\n    d = sdBox(s, vec3(0.5, 1.4, 0.22));\n  } else {\n    d = sdCyl(q - vec3(0.0, 1.0, 0.0), 0.09, 1.0);\n    d = min(d, length(q - vec3(0.0, 2.3, 0.0)) - 0.8);\n    d = min(d, length(q - vec3(0.62, 1.85, 0.1)) - 0.5);\n    d = min(d, length(q - vec3(-0.55, 1.95, -0.15)) - 0.55);\n  }\n  return d;\n}\nfloat setPiece(vec3 p) {\n  if (uSetK.x < 0.5) return 1e5;\n  vec3 q = p - uSet.xyz;\n  float bound = length(q - vec3(0.0, 3.5 * uSet.w, 0.0)) - 5.5 * uSet.w;\n  if (bound > 2.0 * uSet.w) return bound;\n  q.xz = rot(uSetK.y) * q.xz;\n  return setRaw(q / uSet.w, uSetK.x, uSetK.z) * uSet.w;\n}\nSurf setSurf(vec3 p) {\n  vec3 q = p - uSet.xyz;\n  q.xz = rot(uSetK.y) * q.xz;\n  q /= uSet.w;\n  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.55), mix(uInk[SHADE], uInk[DEEP], 0.45), 0.0, 1.0);\n  float k = uSetK.x, lit = uSetK.w;\n  bool accent = false;\n  if (k < 1.5) accent = abs(q.z) < 0.6 && abs(q.x) < 0.8 && q.y < 3.6 && lit > 0.5 && false;\n  else if (k < 2.5) accent = lit > 0.01;\n  else if (k < 3.5) accent = lit > 0.01;\n  else if (k < 4.5) accent = q.y > 5.1 && q.y < 5.5 && abs(q.x) < 0.1;\n  else if (k < 7.5 && k > 6.5) accent = lit > 0.01;\n  else if (k > 7.5) accent = q.y > 1.4 && lit > 0.01;\n  if (accent) {\n    float a = (k > 3.5 && k < 4.5) ? max(lit, 0.35) : lit;\n    s.lit = mix(s.lit, uInk[ACCENT], a);\n    s.shade = mix(s.shade, uInk[ACCENT] * 0.72, a);\n    s.glow = a * ((k > 3.5 && k < 4.5) ? 1.0 : 0.35);\n  }\n  return s;\n}","forms/plain":"#define FAR 1500.0\n#define STEPK 0.92\n#define SHFAR 160.0\nfloat groundH(vec2 x) {\n  return uTr[8] > 0.01 ? uTr[8] * (vnoise(x * 0.012) - 0.5) * smoothstep(8.0, 40.0, abs(x.x)) : 0.0;\n}\nbool isOdd(ivec2 c) { return c.x == int(uTr[5]) && c.y == int(uTr[6]); }\nfloat thing(vec3 q, float kind, float H, float W, vec4 r, bool odd) {\n  float ex = odd ? uTr[7] : 0.0;\n  if (ex > 1.5 && ex < 2.5) return 1e5;\n  if (ex > 2.5 && ex < 3.5) { H *= 2.4; W *= 1.9; }\n  if (ex > 3.5) { q.xy = rot(1.32) * (q.xy - vec2(0.0, W)); q.y += W; }\n  float d;\n  if (kind < 1.5) {\n    float w = W * (1.0 - 0.55 * clamp(q.y / H, 0.0, 1.0));\n    d = max(sdBox2(q.xz, vec2(w)), abs(q.y - H * 0.5) - H * 0.5) * 0.9;\n  } else if (kind < 2.5) {\n    q.xz = rot(r.w * 6.283) * q.xz;\n    float h = H * (0.6 + 0.4 * r.x);\n    d = sdBox(q - vec3(0.0, h * 0.5, 0.0), vec3(W, h * 0.5, W * 0.38)) - W * 0.18;\n  } else if (kind < 3.5) {\n    d = sdCyl(q - vec3(0.0, H * 0.5, 0.0), W * 0.12, H * 0.5);\n    d = min(d, length(q - vec3(0.0, H + W * 0.55, 0.0)) - W * 0.6);\n  } else if (kind < 4.5) {\n    vec3 g = q; g.x = abs(g.x) - W * 2.2;\n    d = sdBox(g - vec3(0.0, H * 0.5, 0.0), vec3(W * 0.3, H * 0.5, W * 0.3));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.94, 0.0), vec3(W * 3.0, W * 0.28, W * 0.38)));\n    d = min(d, sdBox(q - vec3(0.0, H * 0.74, 0.0), vec3(W * 2.4, W * 0.18, W * 0.26)));\n  } else {\n    d = length(q - vec3(0.0, -H * 0.15, 0.0)) - H * 0.75;\n  }\n  return d;\n}\nfloat map(vec3 p) {\n  float d = p.y - groundH(p.xz);\n  d = min(d, setPiece(p));\n  gD = d;\n  float kind = uTr[0];\n  if (kind < 0.5) return d;\n  float S = uTr[1], H = uTr[2], W = uTr[10];\n  float top = H * 2.5 + 2.0;\n  if (p.y > top) { d = min(d, p.y - top + 1.0); gD = d; return d; }\n  ivec2 c = ivec2(floor(p.xz / S));\n  vec4 r = cell4(c);\n  vec3 q = vec3(p.x - (float(c.x) + 0.5) * S, p.y, p.z - (float(c.y) + 0.5) * S);\n  float ex = cellExit(q.xz, S);\n  bool odd = isOdd(c);\n  if (r.x < uTr[4] || odd) {\n    q.xz -= (r.yz - 0.5) * S * 0.42 * uTr[3] * (odd ? 0.0 : 1.0);\n    d = min(d, thing(q, kind, H, W, r, odd));\n  }\n  gD = d;\n  return min(d, ex);\n}\nSurf surf(vec3 p, vec3 n, float t) {\n  float gh = groundH(p.xz);\n  if (setPiece(p) < 0.02 + 0.002 * t) return setSurf(p);\n  if (p.y - gh > 0.03 + 0.003 * t || n.y < 0.6) {\n    Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, 1.0);\n    float S = uTr[1];\n    ivec2 c = ivec2(floor(p.xz / S));\n    vec4 r = cell4(c);\n    bool odd = isOdd(c);\n    float kind = uTr[0];\n    bool lamp = kind > 2.5 && kind < 3.5 && p.y > uTr[2] * (odd && uTr[7] > 2.5 && uTr[7] < 3.5 ? 2.4 : 1.0);\n    float on = lamp ? step(r.w, uEv.x * 1.02 - 0.01) : 0.0;\n    if (odd && uTr[7] > 0.5 && uTr[7] < 1.5 && (lamp || kind < 2.5 || kind > 3.5)) on = 1.0;\n    if (on > 0.5) { s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[PAPER], 0.25); s.glow = lamp ? 1.0 : 0.3; }\n    return s;\n  }\n  Surf s = Surf(uInk[LIT], uInk[SHADE], 0.0, 0.0);\n  float fade = exp(-t * 0.006);\n  if (uTr[9] > 0.5 && uTr[9] < 1.5) {\n    vec2 x = p.xz * 0.16; ivec2 ci = ivec2(floor(x)); vec2 f = fract(x);\n    float d1 = 8.0, d2 = 8.0;\n    for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {\n      vec4 r = cell4(ci + ivec2(i, j) + 53);\n      float d = length(vec2(float(i), float(j)) + r.xy - f);\n      if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) d2 = d;\n    }\n    float line = 1.0 - smoothstep(0.02, 0.05 + 2.0 * uPix * t, d2 - d1);\n    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.55), line * fade);\n    s.shade = mix(s.shade, uInk[DEEP], line * fade * 0.4);\n  } else if (uTr[9] > 1.5) {\n    float line = smoothstep(0.42, 0.5, abs(fract(p.x * 0.5) - 0.5));\n    s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.4), line * fade);\n  }\n  return s;\n}","post/blur":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel; uniform vec2 uDir;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel, d = uDir * uTexel;\n  vec3 s = texture(uSrc, uv).rgb * 0.2270;\n  s += (texture(uSrc, uv + d * 1.3846).rgb + texture(uSrc, uv - d * 1.3846).rgb) * 0.3162;\n  s += (texture(uSrc, uv + d * 3.2308).rgb + texture(uSrc, uv - d * 3.2308).rgb) * 0.0703;\n  O = vec4(s, 1.0);\n}","post/final":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc, uGlow, uNoise;\nuniform vec2 uOut;\nuniform vec4 uK;\nuniform vec3 uFadeInk;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy / uOut;\n  vec3 c = texture(uSrc, uv).rgb; c *= c;\n  vec3 g = texture(uGlow, uv).rgb; g *= g;\n  c += g * uK.x;\n  vec2 px = gl_FragCoord.xy;\n  float fibre = texture(uNoise, px * vec2(0.0021, 0.011)).r - 0.5;\n  float grain = texture(uNoise, px / 256.0).g - 0.5;\n  float tooth = fibre * 0.6 + grain * 0.8;\n  c *= 1.0 + tooth * uK.y;\n  c += tooth * uK.y * 0.012;\n  c = mix(uFadeInk, c, uK.z);\n  c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));\n  O = vec4(c + (grain) / 255.0, 1.0);\n}","post/glowpre":"precision highp float; precision highp int; precision highp sampler2D;\nuniform sampler2D uSrc; uniform vec2 uTexel;\nout vec4 O;\nvoid main() {\n  vec2 uv = gl_FragCoord.xy * uTexel;\n  vec3 s = vec3(0.0);\n  for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) {\n    vec4 c = texture(uSrc, uv + (vec2(float(i), float(j)) - 0.5) * uTexel * 0.5);\n    s += c.rgb * c.rgb * c.a;\n  }\n  O = vec4(sqrt(s * 0.25), 1.0);\n}","z-main":"out vec4 O;\nvec3 skyBase(vec3 rd) {\n  float e = clamp(rd.y, 0.0, 1.0);\n  float g = pow(1.0 - e, 3.4);\n  vec3 c = mix(uInk[TOP], uInk[LOW], g);\n  vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n  vec2 rxz = normalize(rd.xz + vec2(0.0, 1e-4));\n  float toward = max(dot(rxz, sxz), 0.0);\n  float low = 1.0 - smoothstep(0.0, 0.55, uSunDir.y);\n  float wash = pow(toward, 3.0) * pow(1.0 - e, 5.0) * (0.35 + 0.65 * low);\n  c = mix(c, uInk[GLOW], wash * 0.85);\n  float halo = pow(max(dot(rd, uSunDir), 0.0), 24.0 / max(uSun.y, 0.05));\n  c = mix(c, uInk[GLOW], halo * 0.6 * step(-0.08, uSunDir.y));\n  if (rd.y < 0.0) c = mix(c, mix(uInk[LOW], uInk[SHADE], 0.45), clamp(-rd.y * 4.0, 0.0, 1.0));\n  return c;\n}\nvec3 hazeInk(vec3 rd) { return skyBase(normalize(vec3(rd.x, 0.035, rd.z))); }\nvec3 sky(vec3 rd, out float glow) {\n  glow = 0.0;\n  vec3 c = skyBase(rd);\n  float e = rd.y;\n  if (e < -0.02) return c;\n  if (uSky.z > 0.01) {\n    vec2 u = rd.xz / (abs(e) + 0.35) * 26.0;\n    ivec2 ci = ivec2(floor(u));\n    vec4 r = cell4(ci);\n    if (r.x > 1.0 - 0.07 * uSky.z) {\n      float d = length(fract(u) - 0.5 - (r.yz - 0.5) * 0.7);\n      float rad = max(0.035 + 0.05 * r.w, uPix * 30.0);\n      c = mix(c, uInk[PAPER], smoothstep(rad, rad * 0.45, d) * smoothstep(0.0, 0.25, e) * (0.45 + 0.55 * r.w));\n    }\n  }\n  for (int i = uZero; i < 2; i++) {\n    float r = uBody[i].w;\n    if (r > 0.0) {\n    vec3 dir = uBody[i].xyz;\n    vec3 dl = rd - dir;\n    float d = length(dl);\n    float aa = uPix * 1.2;\n    float disc = smoothstep(r + aa, r - aa, d);\n    if (disc > 0.0) {\n      vec3 side = normalize(cross(dir, vec3(0.0, 1.0, 0.0)));\n      float ph = uBodyK[i].x;\n      float lit = abs(ph) < 0.01 ? 1.0 : smoothstep(-aa, aa, length(dl - side * r * ph * 1.3) - r);\n      vec3 ink = mix(uInk[PAPER], uInk[ACCENT], uBodyK[i].z);\n      c = mix(c, mix(mix(c, uInk[SHADE], 0.25), ink, lit), disc);\n      glow = max(glow, disc * lit * 0.25);\n    }\n    if (uBodyK[i].y > 0.5) {\n      vec3 up = normalize(vec3(0.35, 1.0, 0.2));\n      vec3 sx = normalize(cross(dir, up)), sy = cross(sx, dir);\n      vec2 q = vec2(dot(dl, sx), dot(dl, sy) * 3.6) / r;\n      float ring = abs(length(q) - 1.75);\n      float hide = disc * step(0.0, dot(dl, sy));\n      c = mix(c, uInk[PAPER], smoothstep(0.16, 0.08, ring) * (1.0 - hide) * 0.8);\n    }\n    }\n  }\n  if (uSunDir.y > -0.05) {\n    float d = length(rd - uSunDir), aa = uPix * 1.2;\n    float disc = smoothstep(uSun.x + aa, uSun.x - aa, d);\n    c = mix(c, mix(uInk[PAPER], uInk[GLOW], 0.25), disc);\n    glow = max(glow, disc);\n  }\n  if (uSky.w > 0.001) {\n    float az = atan(rd.x, rd.z);\n    vec3 hz = hazeInk(rd);\n    for (int i = uZero; i < 3; i++) {\n      float fi = float(i);\n      float h = uSky.w * (1.0 - 0.27 * fi) * (0.25 + 0.75 * vnoise1(az * (5.0 + 4.0 * fi) + 19.0 * fi + 3.0))\n              + uSky.w * 0.12 * vnoise1(az * (23.0 + 9.0 * fi) + 7.0 * fi);\n      float m = smoothstep(h + uPix, h - uPix, e);\n      c = mix(c, mix(hz, uInk[SHADE], 0.16 + 0.17 * fi), m);\n      glow *= 1.0 - m;\n    }\n  }\n  if (uSky.x > 0.01 && e > 0.0) {\n    float az = atan(rd.x, rd.z);\n    vec2 u = vec2(az * 1.7 + uTime * 0.002, e * 13.0 * uSky.y);\n    float n = 0.62 * vnoise(u) + 0.38 * vnoise(u * vec2(2.3, 1.9) + 17.0);\n    float th = 0.86 - 0.42 * uSky.x;\n    float band = smoothstep(0.03, 0.12, e) * (1.0 - smoothstep(0.3, 0.5, e));\n    float w = 0.012 + 2.0 * uPix;\n    float m = smoothstep(th, th + w, n) * band;\n    float lip = 1.0 - smoothstep(th + 0.02, th + 0.075, n);\n    vec2 sxz = normalize(uSunDir.xz + vec2(1e-4, 0.0));\n    float toward = max(dot(normalize(rd.xz + vec2(0.0, 1e-4)), sxz), 0.0);\n    vec3 body = mix(mix(c, uInk[PAPER], 0.5), uInk[GLOW], 0.45 * toward);\n    vec3 edge = mix(mix(c, uInk[PAPER], 0.85), uInk[GLOW], 0.3 * toward);\n    c = mix(c, mix(body, edge, lip), m);\n    glow *= 1.0 - 0.8 * m;\n  }\n  return c;\n}\nfloat hazeStep(float t) {\n  float h = 1.0 - exp(-t * uAir.x);\n  float n = max(uAir.y, 1.0), x = h * n;\n  return min((floor(x) + smoothstep(0.25, 0.75, fract(x))) / n, 1.0);\n}\nvec3 calcN(vec3 p, float h, out float cav) {\n  vec3 n = vec3(0.0); float s = 0.0;\n  gRd = vec3(0.0);\n  for (int i = uZero; i < 4; i++) {\n    vec3 e = 0.5773 * (2.0 * vec3(float(((i + 3) >> 1) & 1), float((i >> 1) & 1), float(i & 1)) - 1.0);\n    float d = map(p + e * h);\n    n += e * d; s += d;\n  }\n  cav = s / (4.0 * h);\n  return normalize(n);\n}\nfloat discHit(vec3 ro, vec3 rd, vec4 c, vec4 n, out float rr) {\n  rr = 0.0;\n  float R = c.w * n.w;\n  if (R <= 0.001) return -1.0;\n  float dn = dot(rd, n.xyz);\n  if (abs(dn) < 1e-5) return -1.0;\n  float t = dot(c.xyz - ro, n.xyz) / dn;\n  if (t <= 0.0) return -1.0;\n  rr = length(ro + rd * t - c.xyz) / R;\n  return rr < 1.0 ? t : -1.0;\n}\nvoid main() {\n  vec2 fc = gl_FragCoord.xy;\n  vec2 uv = (fc * 2.0 - uRes) / uRes.y;\n  vec3 rd = normalize(uv.x * uCamR + uv.y * uCamU + uCamF);\n  vec3 ro = uCamP;\n  vec3 rd0 = rd, ro0 = ro;\n  float tMin = 0.05;\n  if (uClipOn > 0.5) {\n    float dn = dot(rd, uClip.xyz);\n    float tc = (uClip.w - dot(ro, uClip.xyz)) / (abs(dn) < 1e-5 ? 1e-5 : dn);\n    if (dn > 0.0) tMin = max(tMin, tc);\n  }\n  int nSteps = int(uQ.x), nShadow = int(uQ.z);\n  vec3 acc = vec3(0.0);\n  float wgt = 1.0, glowOut = 0.0, tFirst = FAR, travelled = 0.0, cost = 0.0;\n  for (int b = uZero; b < 2; b++) {\n    float tMax = FAR; int stop = 0; float rr = 0.0; int pi = 0;\n    if (uSea.x > 0.5 && rd.y < -1e-4) {\n      float ts = (uSea.y - ro.y) / rd.y;\n      if (ts > tMin && ts < tMax) { tMax = ts; stop = 1; }\n    }\n    for (int k = uZero; k < 2; k++) {\n      float r1; float tp = discHit(ro, rd, uPortC[k], uPortN[k], r1);\n      if (tp > tMin && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }\n    }\n    float t = tMin, pd = 1e9, edge = 0.0; bool hit = false, spent = true;\n    gRd = rd;\n    float jit = 0.6 + 0.4 * ign(fc + float(b) * 17.0);\n    for (int i = uZero; i < 200; i++) {\n      if (i >= nSteps) break;\n      float d = map(ro + rd * t);\n      cost += 1.0;\n      if (d < 0.6 * uPix * t + 0.0008) { hit = true; spent = false; break; }\n      if (gD > pd && pd < 1.6 * uPix * t) edge = 1.0;\n      pd = gD;\n      t += d * STEPK * (i == 0 ? jit : 1.0);\n      if (t > tMax) { spent = false; break; }\n    }\n    vec3 c; float g = 0.0; bool bounce = false;\n    if (spent && t < tMax * 0.97) {\n      c = hazeInk(rd);\n      if (b == 0) tFirst = t;\n    } else if (hit && t < tMax) {\n      vec3 p = ro + rd * t;\n      float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);\n      n -= max(0.0, dot(n, rd)) * rd; n = normalize(n);\n      Surf s = surf(p, n, t);\n      float ndl = dot(n, uSunDir), sh = 0.0;\n      if (ndl > 0.0 && uSunDir.y > -0.02) {\n        sh = 1.0; float st = 0.02 + 0.004 * t; vec3 sp = p + n * (0.01 + 0.002 * t);\n        gRd = uSunDir;\n        for (int i = uZero; i < 48; i++) {\n          if (i >= nShadow) break;\n          float d = map(sp + uSunDir * st);\n          cost += 1.0;\n          sh = min(sh, uSun.w * d / st);\n          st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);\n          if (sh < 0.02 || st > SHFAR) break;\n        }\n        sh = smoothstep(0.25, 0.6, sh);\n      }\n      float key = smoothstep(-0.02, 0.5, ndl) * sh;\n      float nb = max(uSun.z, 1.0), x = key * nb;\n      float tone = min((floor(x) + smoothstep(0.38, 0.62, fract(x))) / nb, 1.0);\n      vec3 shade = mix(s.shade, mix(s.shade, uInk[TOP], 0.22), clamp(n.y, 0.0, 1.0));\n      c = mix(shade, s.lit, tone);\n      c = mix(c, uInk[DEEP], clamp(-cav * 1.4, 0.0, 0.55) * s.line);\n      c = mix(c, uInk[PAPER], clamp(cav * 0.7, 0.0, 0.22) * s.line * tone);\n      for (int k = uZero; k < 2; k++) {\n        float R = uPortC[k].w * uPortN[k].w;\n        if (R > 0.001) {\n          vec3 lp = uPortC[k].xyz - p; float l2 = dot(lp, lp);\n          float f = R * R / (l2 + R * R) * clamp(dot(n, lp) * inversesqrt(l2) * 0.75 + 0.25, 0.0, 1.0);\n          c = mix(c, uPortInk[k], f * 0.55);\n        }\n      }\n      g = s.glow;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7 * exp(-t * uAir.x * 2.0));\n      float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);\n      c = mix(c, mix(hazeInk(rd), uInk[PAPER], 0.45), mist);\n      float hz = hazeStep(travelled + t);\n      c = mix(c, hazeInk(rd), hz * 0.94);\n      g *= 1.0 - hz;\n      if (b == 0) tFirst = t;\n    } else if (stop == 2) {\n      vec3 through = b == 0\n        ? (pi == 0 ? texelFetch(uPortTex0, ivec2(fc), 0).rgb : texelFetch(uPortTex1, ivec2(fc), 0).rgb)\n        : sqrt(uPortInk[pi]);\n      through *= through;\n      float lw = clamp(2.2 * uPix * tMax / (uPortC[pi].w * uPortN[pi].w), 0.004, 0.2);\n      float rim = smoothstep(1.0 - lw, 1.0 - 0.5 * lw, rr);\n      c = mix(through, uInk[PAPER], rim);\n      g = rim * 0.5;\n      if (edge > 0.5) c = mix(c, uInk[DEEP], 0.7);\n      if (b == 0) tFirst = tMax;\n    } else if (stop == 1) {\n      vec3 pw = ro + rd * tMax;\n      float far = hazeStep(travelled + tMax);\n      if (b == 0) tFirst = tMax;\n      if (uSea.x > 2.5) {\n        float wv = vnoise2(pw.xz * 0.012 + uTime * 0.01);\n        c = mix(mix(hazeInk(rd), uInk[PAPER], 0.35 + 0.3 * step(0.5, wv)), hazeInk(rd), far * 0.9);\n      } else {\n        float rp = uSea.z * (1.0 - 0.9 * far);\n        vec2 rel = pw.xz - ro0.xz;\n        float dist = length(rel), ld = log(dist + 2.0);\n        float lat = atan(rel.x, rel.y);\n        float w1 = vnoise(vec2(lat * 9.0 + uTime * 0.02, ld * 26.0 - uTime * 0.35));\n        float w2 = vnoise(vec2(lat * 3.0, ld * 9.0 + uTime * 0.12));\n        vec3 nw = normalize(vec3((w2 - 0.5) * 0.10 * rp, 1.0, (w1 - 0.5) * 0.05 * rp));\n        float f0 = uSea.x > 1.5 ? 0.86 : 0.42;\n        float fr = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-rd, nw), 0.0, 1.0), 4.0);\n        float fine = 1.0 - smoothstep(0.12, 0.3, 26.0 * uPix / max(-rd.y, 0.004));\n        float stroke = smoothstep(0.71, 0.74, w1) * smoothstep(0.35, 0.5, w2) * rp * fine;\n        vec3 body = mix(mix(uInk[SHADE], uInk[TOP], 0.5), hazeInk(rd), far * 0.94);\n        body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.5 * (1.0 - far));\n        if (b == 0 && uQ.y > 0.5) {\n          float nearK = 0.4 * (1.0 - smoothstep(4.0, 70.0, dist));\n          fr *= 1.0 - nearK;\n          acc += wgt * (1.0 - fr) * body;\n          wgt *= fr * (1.0 - 0.75 * stroke);\n          ro = pw + vec3(0.0, 0.01, 0.0);\n          rd = reflect(rd, nw); rd.y = max(rd.y, 0.015); rd = normalize(rd);\n          travelled = tMax; tMin = 0.05;\n          nSteps = int(uQ.y);\n          bounce = true;\n        } else {\n          float gs; c = mix(body, sky(reflect(rd, nw), gs), fr);\n        }\n      }\n    } else {\n      c = sky(rd, g);\n    }\n    if (!bounce) { acc += wgt * c; glowOut += wgt * g; break; }\n  }\n  if (uPart.x > 0.5) {\n    for (int k = uZero; k < 3; k++) {\n      float dk = 5.0 + 9.0 * float(k) * float(k);\n      if (dk < tFirst) {\n      vec3 p = ro0 + rd0 * dk;\n      float cs = 1.6 + 1.3 * float(k);\n      float rain = step(3.5, uPart.x);\n      p.y += uTime * uPart.z * (1.0 + 0.3 * float(k));\n      p.x += uTime * uPart.z * 0.35 + 0.6 * sin(p.y * 0.4 + float(k));\n      vec3 q = p / cs; q.y *= mix(1.0, 0.18, rain);\n      ivec3 ci = ivec3(floor(q));\n      vec4 r = cell4(ci.xy + ci.z * ivec2(37, 17) + k * 91);\n      vec3 f = fract(q) - 0.5 - (r.xyz - 0.5) * 0.6;\n      f.y /= mix(1.0, 0.18, rain);\n      float size = (0.035 + 0.05 * r.x) * uPart.w * mix(1.0, 0.45, rain) / cs * (1.0 + 20.0 * uPix * dk);\n      float m = smoothstep(size, size * 0.6, length(f.xy * vec2(1.0, mix(1.0, 0.1, rain)))) * step(r.w, uPart.y);\n      vec3 ink = uPart.x < 2.5 ? uInk[PAPER] : (uPart.x < 3.5 ? mix(uInk[ACCENT], uInk[PAPER], 0.35) : mix(uInk[PAPER], uInk[LOW], 0.5));\n      acc = mix(acc, ink, m * (uPart.x > 1.5 && uPart.x < 2.5 ? 0.6 : 0.9) * mix(1.0, 0.5, rain));\n      }\n    }\n  }\n  if (uQ.w > 0.5) { acc = vec3(cost / 200.0, cost > 160.0 ? 1.0 : 0.0, 0.0); glowOut = 0.0; }\n  acc = clamp(acc, 0.0, 1.0);\n  vec3 enc = sqrt(acc) + (ign(fc) - 0.5) / 255.0;\n  O = vec4(enc, clamp(glowOut, 0.0, 1.0));\n}"};
+// ---- 00-util.js
+'use strict';
+// ---------- small maths ----------
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const sat = (x) => clamp(x, 0, 1);
+const mix = (a, b, t) => a + (b - a) * t;
+const smooth = (a, b, x) => { const t = sat((x - a) / (b - a)); return t * t * (3 - 2 * t); };
+// frame-rate independent approach of a toward b; k is "per second" sharpness
+const damp = (a, b, k, dt) => b + (a - b) * Math.exp(-k * dt);
+
+const V = {
+  add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+  sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]],
+  mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s],
+  dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+  cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]],
+  len: (a) => Math.hypot(a[0], a[1], a[2]),
+  norm: (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; },
+  mix: (a, b, t) => [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)],
+};
+
+// ---------- seeded randomness ----------
+// Every trait draws from its own stream, keyed by a label, so adding a trait
+// later never reshuffles the traits that already exist for a given seed.
+function hashStr(s) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function mix32(a) {
+  a = Math.imul(a ^ (a >>> 16), 0x85ebca6b);
+  a = Math.imul(a ^ (a >>> 13), 0xc2b2ae35);
+  return (a ^ (a >>> 16)) >>> 0;
+}
+function rngFrom(seed) {
+  let a = seed >>> 0;
+  const r = () => {                       // mulberry32
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  r.range = (lo, hi) => lo + (hi - lo) * r();
+  r.int = (lo, hi) => lo + Math.floor(r() * (hi - lo + 1));
+  r.chance = (p) => r() < p;
+  r.pick = (arr) => arr[Math.floor(r() * arr.length)];
+  // weighted pick: items are [value, weight]
+  r.weighted = (items) => {
+    let sum = 0; for (const it of items) sum += it[1];
+    let x = r() * sum;
+    for (const it of items) { x -= it[1]; if (x <= 0) return it[0]; }
+    return items[items.length - 1][0];
+  };
+  return r;
+}
+const stream = (seed, label) => rngFrom(mix32((seed >>> 0) ^ hashStr(label)));
+
+// ---------- colour: OKLCH -> linear sRGB ----------
+// Palettes are composed in OKLCH so that lightness and chroma are perceptual,
+// then handed to the shaders as linear RGB.
+function oklch(L, C, hDeg) {
+  const h = (hDeg * Math.PI) / 180;
+  const a = C * Math.cos(h), b = C * Math.sin(h);
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.2914855480 * b;
+  const l = l_ * l_ * l_, m = m_ * m_ * m_, s = s_ * s_ * s_;
+  return [
+    Math.max(0, 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+    Math.max(0, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+    Math.max(0, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+  ];
+}
+const lin2srgb = (c) => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
+const cssColor = (rgb, a = 1) =>
+  `rgba(${rgb.map((c) => Math.round(255 * sat(lin2srgb(c)))).join(',')},${a})`;
+
+// base-36 world codes: short, typeable, case-insensitive
+const seedToCode = (seed) => (seed >>> 0).toString(36).toUpperCase().padStart(7, '0');
+const codeToSeed = (code) => {
+  const n = parseInt(String(code).replace(/[^0-9a-z]/gi, ''), 36);
+  return Number.isFinite(n) ? n >>> 0 : null;
+};
+
+// ---- 10-gl.js
+// ---------- WebGL2 plumbing ----------
+// Raw WebGL2, no library. Everything is drawn with one oversized triangle.
+const GLX = {
+  gl: null, caps: {}, lost: false,
+
+  init(canvas) {
+    const gl = canvas.getContext('webgl2', {
+      antialias: false, alpha: false, depth: false, stencil: false,
+      powerPreference: 'high-performance', preserveDrawingBuffer: false,
+    });
+    if (!gl) return null;
+    this.gl = gl;
+    const caps = this.caps;
+    caps.floatTarget = !!gl.getExtension('EXT_color_buffer_float');
+    caps.halfTarget = caps.floatTarget || !!gl.getExtension('EXT_color_buffer_half_float');
+    caps.floatLinear = !!gl.getExtension('OES_texture_float_linear');
+    caps.parallel = gl.getExtension('KHR_parallel_shader_compile');
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    caps.renderer = String(gl.getParameter(dbg ? dbg.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '');
+    caps.software = /swiftshader|llvmpipe|software/i.test(caps.renderer);
+    caps.maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    // HDR path needs a renderable half-float target that can be filtered; half
+    // float is always filterable in WebGL2. Otherwise fall back to 8-bit.
+    caps.hdr = caps.halfTarget && this._probeTarget(gl.RGBA16F, gl.HALF_FLOAT);
+    this.vao = gl.createVertexArray();
+    gl.bindVertexArray(this.vao);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    return gl;
+  },
+
+  _probeTarget(internal, type) {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, 4, 4, 0, gl.RGBA, type, null);
+    const f = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.deleteFramebuffer(f); gl.deleteTexture(t);
+    return ok;
+  },
+
+  // A colour target. hdr=true asks for half float and quietly gets 8-bit when
+  // the device cannot render to it.
+  target(w, h, { hdr = true, linear = true } = {}) {
+    const gl = this.gl;
+    const useHdr = hdr && this.caps.hdr;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, useHdr ? gl.RGBA16F : gl.RGBA8, w, h, 0, gl.RGBA,
+      useHdr ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE, null);
+    const f = linear ? gl.LINEAR : gl.NEAREST;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex, fbo, w, h, hdr: useHdr };
+  },
+  freeTarget(t) { if (!t) return; this.gl.deleteFramebuffer(t.fbo); this.gl.deleteTexture(t.tex); },
+
+  // An 8-bit data texture that repeats.
+  dataTexture(size, bytes, { linear = true } = {}) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+    const f = linear ? gl.LINEAR : gl.NEAREST;
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  },
+
+  VS: `#version 300 es
+void main(){ vec2 p = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }`,
+
+  // Starts a compile and returns at once. Poll with ready(); the link status is
+  // only read after the driver reports completion, so nothing blocks the frame
+  // where KHR_parallel_shader_compile exists.
+  program(fsSource, label) {
+    const gl = this.gl;
+    const mk = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+    const vs = mk(gl.VERTEX_SHADER, this.VS);
+    const fs = mk(gl.FRAGMENT_SHADER, fsSource);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    return { prog, vs, fs, label, src: fsSource, state: 'compiling', started: performance.now(), uniforms: new Map(), error: null };
+  },
+
+  // -> 'compiling' | 'ready' | 'failed'
+  ready(p) {
+    if (p.state !== 'compiling') return p.state;
+    const gl = this.gl;
+    if (gl.isContextLost()) return p.state;
+    const ext = this.caps.parallel;
+    if (ext && !gl.getProgramParameter(p.prog, ext.COMPLETION_STATUS_KHR)) return p.state;
+    if (gl.getProgramParameter(p.prog, gl.LINK_STATUS)) {
+      p.state = 'ready';
+      p.compileMs = performance.now() - p.started;
+    } else {
+      p.state = 'failed';
+      p.error = (gl.getShaderInfoLog(p.fs) || '') + (gl.getProgramInfoLog(p.prog) || '');
+      console.error('[shader] ' + p.label + ' failed\n' + GLX.annotate(p.src, p.error));
+    }
+    gl.deleteShader(p.vs); gl.deleteShader(p.fs);
+    return p.state;
+  },
+  freeProgram(p) { if (p && p.prog) { this.gl.deleteProgram(p.prog); p.prog = null; p.state = 'freed'; } },
+
+  // Shows the offending lines of the assembled source next to a driver error.
+  annotate(src, log) {
+    const lines = src.split('\n'); const seen = new Set(); let out = log.trim();
+    for (const m of log.matchAll(/ERROR:\s*\d+:(\d+)/g)) {
+      const n = +m[1]; if (seen.has(n)) continue; seen.add(n);
+      out += `\n  ${n}: ${(lines[n - 1] || '').trim()}`;
+      if (seen.size > 6) break;
+    }
+    return out;
+  },
+
+  use(p) { this.gl.useProgram(p.prog); this.cur = p; },
+  loc(name) {
+    const p = this.cur; let l = p.uniforms.get(name);
+    if (l === undefined) { l = this.gl.getUniformLocation(p.prog, name); p.uniforms.set(name, l); }
+    return l;
+  },
+  // Uniform setters that silently skip uniforms the compiler optimised away.
+  f(name, x) { const l = this.loc(name); if (l) this.gl.uniform1f(l, x); },
+  i(name, x) { const l = this.loc(name); if (l) this.gl.uniform1i(l, x); },
+  v2(name, x, y) { const l = this.loc(name); if (l) this.gl.uniform2f(l, x, y); },
+  v3(name, v) { const l = this.loc(name); if (l) this.gl.uniform3f(l, v[0], v[1], v[2]); },
+  v4(name, a, b, c, d) { const l = this.loc(name); if (l) this.gl.uniform4f(l, a, b, c, d); },
+  fv(name, arr) { const l = this.loc(name); if (l) this.gl.uniform1fv(l, arr); },
+  v3v(name, arr) { const l = this.loc(name); if (l) this.gl.uniform3fv(l, arr); },
+  tex(name, unit, tex) {
+    const gl = this.gl, l = this.loc(name);
+    gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (l) gl.uniform1i(l, unit);
+  },
+  // Draw into a target (or the canvas when t is null), into the sub-rectangle w x h.
+  draw(t, w, h, scissor) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t ? t.fbo : null);
+    gl.viewport(0, 0, w, h);
+    if (scissor) { gl.enable(gl.SCISSOR_TEST); gl.scissor(scissor[0], scissor[1], scissor[2], scissor[3]); }
+    else gl.disable(gl.SCISSOR_TEST);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (scissor) gl.disable(gl.SCISSOR_TEST);
+  },
+};
+
+// ---- 20-palettes.js
+// ---------- inks ----------
+// Every world is printed in eight inks with fixed roles. They are composed by
+// hand, as a printer would mix them, and worlds move between palettes; hue is
+// never spun freely.
+//   top    sky at the zenith            low    sky at the horizon, and the haze
+//   glow   the sky around the sun       lit    surfaces in light
+//   shade  surfaces in shadow           deep   nearest silhouettes and line
+//   paper  the lightest ink: snow, foam, mist, moons
+//   accent the one loud ink: used on less than a twentieth of the picture
+// hour: 0 night, 1 dawn or dusk, 2 day.  temp: -1 cool .. 1 warm.
+const PALETTES = [
+  // name,              hour,temp, top,      low,      glow,     lit,      shade,    deep,     paper,    accent
+  ['Lamp Black',          0, -0.6, '#05070f','#16224a','#6f86c9','#2c3e78','#0f1838','#04050c','#e3e9f7','#f6cf6a'],
+  ['Indigo Vat',          0, -0.9, '#080d24','#243a7a','#8fb0ea','#3f5aa3','#162050','#070a1a','#eef3fb','#ff6a3d'],
+  ['Mulberry Night',      0,  0.1, '#0e0718','#3a1f4f','#b98bd0','#5a3a78','#231238','#0b0512','#f3e6f2','#ffd27a'],
+  ['Verdigris Night',     0, -0.4, '#04100f','#12403f','#7fd1c0','#1f6460','#0a2a2c','#030a0a','#e6f5ee','#ff8a4a'],
+  ['Coal and Ember',      0,  0.7, '#0a0706','#2e1711','#c96a3a','#4a2a20','#1c0f0c','#070403','#f2dfc9','#ff5a1f'],
+  ['Prussian',            0, -0.8, '#030a1a','#0f3a66','#6fb3e0','#1e5f96','#0a2647','#020611','#eaf4fb','#ffe08a'],
+
+  ['Kawase Dusk',         1,  0.5, '#1d2b5a','#f0a27a','#ffd9a3','#c9775a','#3a3358','#17172b','#f8ead2','#e23d28'],
+  ['Persimmon',           1,  0.9, '#6a2c4a','#f6b06a','#fff0c2','#e58a4e','#5a2b3f','#241020','#fdf1d6','#2f7fa8'],
+  ['Rose Madder',         1,  0.4, '#3b2a63','#f29aa2','#ffe1c9','#d9788a','#4a3260','#1b1430','#fbeee6','#ffc94a'],
+  ['Apricot Haze',        1,  0.7, '#7c6a9a','#f7c59f','#fff3d6','#e9a57b','#6a5278','#2a2238','#fff6e6','#c8402e'],
+  ['Wisteria',            1, -0.1, '#2a2f6e','#b9a3e3','#f3dcf5','#8f7fd0','#3a3478','#15163a','#f4eefb','#ffb347'],
+  ['Brass and Plum',      1,  0.6, '#2b1836','#d99a4e','#ffe6a6','#b8763a','#3d2140','#160c1e','#f7ead0','#4fb3a5'],
+  ['Salmon and Slate',    1,  0.2, '#3a4a66','#f2b6a0','#ffe9d6','#c98f86','#46506a','#1b2233','#f6efe8','#e0452f'],
+  ['First Light',         1, -0.3, '#2f4f8a','#f4d6c4','#ffffff','#a9b9d9','#4a5f93','#1a2648','#fbfaf5','#ff7a59'],
+  ['Mint Dawn',           1, -0.5, '#2c5a6a','#c9ead2','#fbffe6','#7fbfae','#2f5f68','#102a33','#f5fbf0','#ff6f61'],
+  ['Cinnabar Dusk',       1,  1.0, '#3b1028','#e8553a','#ffc27a','#b83a30','#4a1430','#1c0714','#fbe3c6','#3aa6b9'],
+  ['Lilac Smoke',         1,  0.0, '#4b4470','#d8c1d6','#fff0ea','#a893b5','#544b74','#211d36','#f7f1f4','#e8a13a'],
+  ['Tangerine Sea',       1,  0.8, '#1f3f6b','#ff9f5a','#ffe7a8','#d9793f','#243a5e','#0e1a30','#fff1d9','#f2385a'],
+
+  ['Celadon',             2, -0.3, '#5f9fb0','#d7ecdc','#ffffff','#9fc7a8','#4c7f84','#1f3a40','#f8fbf2','#d9482b'],
+  ['Cyanotype',           2, -1.0, '#1f4f9a','#a9d0f2','#ffffff','#5f93d1','#1f4688','#0c2148','#f4f9fd','#ffb52e'],
+  ['Bone and Ochre',      2,  0.6, '#7fa3b8','#f0e2c2','#fffbe8','#d9b67a','#8a6f4f','#3a2c22','#fbf5e4','#2f6f8f'],
+  ['Salt Flat',           2,  0.1, '#6f9fd0','#eef0f2','#ffffff','#d9d6cf','#8f95a8','#3a4055','#ffffff','#ff5a3c'],
+  ['Terracotta',          2,  0.9, '#4f8fb3','#f6d9b8','#fff6dd','#d9824f','#8a4a36','#3a1f1a','#fdf0da','#1f7f78'],
+  ['Moss and Chalk',      2,  0.0, '#6fa8c9','#e3ecd6','#ffffff','#9fb56a','#4f6a44','#1f2e20','#f9faee','#e8502e'],
+  ['Lapis Noon',          2, -0.7, '#1a3f8f','#8fc3ea','#ffffff','#e9d9b0','#3a5a9a','#12224f','#fffaf0','#e8402a'],
+  ['Milk Glass',          2, -0.2, '#a9c9dd','#f3f1ea','#ffffff','#e6dfd2','#a3a9b8','#4a5266','#ffffff','#3f6fd9'],
+  ['Saffron',             2,  1.0, '#3f7fb8','#ffe2a3','#fffbe0','#f0b33f','#9a5a2a','#3f2414','#fff6dc','#b0263a'],
+  ['Jade and Rust',       2,  0.3, '#4f9aa0','#dfeedd','#ffffff','#6fae8f','#2f5f58','#12302c','#f4faf0','#c9512a'],
+  ['Pewter',              2, -0.5, '#6f7f93','#d3d9df','#f5f7f9','#aab3bf','#5a6676','#252c38','#f2f4f6','#f2a03a'],
+  ['Sea Glass',           2, -0.6, '#3f8fb8','#bfe6e0','#ffffff','#7fc9c0','#2f6f80','#103540','#f2fbf8','#ff7f50'],
+
+  // strange inks: skies that are not air
+  ['Absinthe',            1,  0.0, '#0f2a1a','#b7d94f','#f7ffb0','#7fa83a','#1f4a2a','#0a1a10','#f6fbdc','#e03a7a'],
+  ['Oxblood Sky',         2,  0.8, '#5a0f1a','#e8a08a','#ffe2c9','#c9584f','#5a1a2a','#22080f','#fbe9de','#3ac0c9'],
+  ['Negative',            2, -0.4, '#e9e4d6','#9fa9c0','#ffffff','#3a4266','#1a1f3a','#0a0c1a','#fbf8ee','#ff4a2e'],
+  ['Ultraviolet',         0, -0.2, '#0a0420','#4a1fa0','#c08aff','#6a3fd0','#22104f','#070314','#efe6ff','#3affc0'],
+  ['Sulphur',             2,  0.7, '#6a6a2a','#f2e27a','#fffbc0','#d9c24a','#6a5a22','#2a240c','#fffbe0','#3a5fd9'],
+  ['Litmus',              1, -0.2, '#1a3a6a','#f08fb0','#ffe0f0','#c96a9a','#3a3a7a','#141a3a','#fbeef5','#7fe0a0'],
+].map((p) => {
+  const hex = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255].map((c) => Math.pow(c, 2.2)); };
+  const [name, hour, temp, ...inks] = p;
+  const keys = ['top', 'low', 'glow', 'lit', 'shade', 'deep', 'paper', 'accent'];
+  const o = { name, hour, temp };
+  keys.forEach((k, i) => { o[k] = hex(inks[i]); });
+  return o;
+});
+const INK_KEYS = ['top', 'low', 'glow', 'lit', 'shade', 'deep', 'paper', 'accent'];
+const PALETTE_BY_NAME = Object.fromEntries(PALETTES.map((p) => [p.name, p]));
+
+// ---- 30-world.js
+// ---------- worlds ----------
+// A world is a pure function of its key { base, change, heir, age }.
+//   base    the place itself: its form, layout, set piece, event
+//   change  0 for the place as first found; otherwise how this kin differs
+//   heir    something handed down a line of worlds (a moon, a tune)
+// Every trait draws from its own named stream, so new traits never disturb old ones.
+const FORMS = {};
+const WORLD = {
+  formNames() { return Object.keys(FORMS); },
+
+  pathAt(g, z) {
+    const p = g.path;
+    return [p.ax * Math.sin(z * p.fx + p.px), p.y0 + p.ay * Math.sin(z * p.fy + p.py)];
+  },
+
+  make(key) {
+    const base = key.base >>> 0;
+    const S = (label) => stream(base, label);
+    const g = {
+      key, form: null,
+      tr: new Float32Array(16),
+      path: { ax: 0, fx: 0, px: 0, ay: 0, fy: 0, py: 0, y0: 6 },
+      speed: 14, lead: 60, tilt: 0, focal: 2.05,
+      sunAz: 0.6, sunEl: 0.35, sun: [0.03, 1, 3, 9],
+      air: [0.0016, 6, -100, 0], sea: [0, 0, 1, 0],
+      set: { type: 0, pos: [0, 0, 0], scale: 10, yaw: 0, attend: 0.6, eye: 2.5, move: 0, lit: 0 },
+      ev: { id: 0, type: 'none', t0: 22, dur: 16 },
+      sky: [0.3, 1, 0, 0],
+      body: new Float32Array(8), bodyK: new Float32Array(8),
+      part: [0, 0, 0, 1],
+      door: { r: 7, kin: [0, 0], stranger: [0, 0] }, doorsAt: 44,
+      facts: {},
+    };
+    // 1. the place
+    const formPick = S('form');
+    const names = Object.keys(FORMS);
+    g.form = key.form && FORMS[key.form] ? key.form : formPick.weighted(names.map((n) => [n, FORMS[n].weight || 1]));
+    const F = FORMS[g.form];
+    // 2. its inks and its hour
+    const pr = S('ink');
+    const pool = PALETTES.filter((p) => !F.hours || F.hours.includes(p.hour));
+    g.pal = key.pal && PALETTE_BY_NAME[key.pal] ? PALETTE_BY_NAME[key.pal] : pr.pick(pool);
+    WORLD.light(g, S('light'));
+    // 3. the form lays out its ground, set piece and event
+    F.build(g, S);
+    // 4. kin: the same place, changed
+    if (key.change) WORLD.change(g, key.change >>> 0);
+    g.inks = g.pal;
+    g.inkFlat = new Float32Array(24);
+    INK_KEYS.forEach((k, i) => g.inkFlat.set(g.pal[k], i * 3));
+    g.doorInk = V.mix(g.pal.glow, g.pal.low, 0.35);
+    return g;
+  },
+
+  // Sun or moon, sky furniture, weather: decided from the palette's hour.
+  light(g, r) {
+    const hour = g.pal.hour;
+    const side = r.chance(0.5) ? 1 : -1;
+    if (hour === 1) { g.sunAz = side * r.range(0.12, 0.5); g.sunEl = r.range(0.05, 0.16); g.sun = [0.045, 1.6, 3, 10]; }
+    else if (hour === 2) { g.sunAz = side * r.range(0.5, 1.1); g.sunEl = r.range(0.42, 0.85); g.sun = [0.026, 0.7, 3, 14]; }
+    else { g.sunAz = side * r.range(0.25, 0.8); g.sunEl = r.range(0.3, 0.6); g.sun = [0.05, 0.9, 2, 12]; }
+    g.sky = [r.chance(0.7) ? r.range(0.2, 0.75) : 0, r.range(0.7, 1.6), hour === 0 ? r.range(0.6, 1) : (hour === 1 ? r.range(0, 0.35) : 0), r.chance(0.55) ? r.range(0.03, 0.09) : 0];
+    g.air = [r.range(0.0011, 0.0026), r.int(5, 8), -100, 0];
+  },
+
+  change(g, change) {
+    // filled in with the kin transformations
+    const r = stream(change, 'kind');
+    const others = PALETTES.filter((p) => p !== g.pal);
+    g.pal = r.pick(others);
+    WORLD.light(g, stream(change, 'light'));
+  },
+
+  // What the world looks like at this moment of the visit. ta is seconds since
+  // arrival (drives the event); t is the world's own running clock.
+  live(g, ta, t) {
+    const e = g.ev.type === 'none' ? 0 : smooth(0, 1, (ta - g.ev.t0) / g.ev.dur);
+    const L = {
+      ev: e, inks: g.inkFlat, tr: g.tr,
+      sun: g.sun, air: g.air.slice(), sea: g.sea.slice(), sky: g.sky, body: g.body, bodyK: g.bodyK, part: g.part,
+      set: g.set.pos, setMotion: g.set.move, setLit: g.set.lit,
+    };
+    let el = g.sunEl, az = g.sunAz;
+    const ty = g.ev.type;
+    if (ty === 'rise') { L.setMotion = e; L.setLit = e; }
+    else if (ty === 'lights') { L.setLit = e; }
+    else if (ty === 'tide') { L.sea[1] = g.sea[1] + g.ev.amount * e; }
+    else if (ty === 'mist') { L.air[2] = mix(g.air[2], g.ev.amount, e); L.air[3] = mix(g.air[3], 0.03, e); }
+    else if (ty === 'sunset') { el = mix(g.sunEl, -0.04, e); }
+    L.sunDir = [Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el)];
+    return L;
+  },
+};
+
+// ---- PLAIN ----
+FORMS.plain = {
+  weight: 1,
+  build(g, S) {
+    const r = S('plain');
+    const kind = r.weighted([[1, 3], [2, 3], [3, 3], [4, 2], [5, 1.5]]);
+    const spacing = r.range(26, 46);
+    const H = { 1: r.range(9, 20), 2: r.range(3.5, 7), 3: r.range(6, 9), 4: r.range(7, 12), 5: r.range(3, 6) }[kind];
+    const W = { 1: r.range(0.9, 1.6), 2: r.range(1.1, 1.9), 3: 1.0, 4: r.range(0.8, 1.1), 5: 1 }[kind];
+    const odd = r.int(1, 4);
+    const oz = Math.round((g.speed * r.range(16, 22)) / spacing), ox = r.chance(0.5) ? 0 : -1;
+    g.tr.set([kind, spacing, H, kind === 2 ? 0.8 : r.range(0, 0.25), kind === 5 ? 0.45 : r.range(0.75, 1), ox, oz, odd, r.chance(0.3) ? r.range(2, 6) : 0, r.int(0, 2), W]);
+    g.path.y0 = r.range(3.2, 6.5);
+    g.speed = r.range(11, 16); g.lead = 70; g.tilt = -0.01;
+    if (r.chance(0.6)) g.sea = [2, 0.03, r.range(0.35, 1), 0];
+    g.door = { r: 5.5, kin: [0, 0.5], stranger: [spacing * 0.0 + 9, 7] };
+    if (r.chance(0.55)) {
+      const type = r.pick([1, 2, 3, 4, 5, 6, 7, 8]);
+      const scale = r.range(9, 22);
+      const onLine = type === 3 || type === 6 || type === 1;
+      g.set = { type, pos: [onLine ? 0 : (r.chance(0.5) ? 1 : -1) * r.range(1.2, 2.2) * scale, type === 3 ? -scale * 0.2 : 0, g.speed * r.range(24, 30)], scale, yaw: 0, attend: onLine ? 0.2 : 0.75, eye: 2.6, move: 0, lit: 0 };
+      if (onLine) g.path.y0 = Math.max(g.path.y0, type === 3 ? scale * 1.3 : scale * 1.2) * (type === 1 ? 0.9 : 1), g.set.pos[1] = type === 3 ? g.path.y0 - 1.55 * scale : 0;
+      g.ev = { id: 1, type: 'rise', t0: 10, dur: 14 };
+    } else if (kind === 3) g.ev = { id: 2, type: 'lights', t0: 8, dur: 26 };
+  },
+};
+
+// ---- 40-engine.js
+// ---------- the engine ----------
+// Draws one world, the views through its two portals, and carries the viewer
+// from one world into the next. The worlds themselves come from WORLD.make().
+const ENG = {
+  gl: null, canvas: null,
+  cw: 2, ch: 2,            // canvas backing store
+  rw: 2, rh: 2,            // size of the world pass (the plate is printed small, then enlarged)
+  budget: 0.30e6,          // pixels in the world pass; the governor moves this
+  budgetMax: 1.6e6, budgetMin: 0.1e6,
+  quality: { steps: 96, reflect: 44, shadow: 26 },
+  progs: new Map(),        // form name -> program, kept for the session
+  badForms: new Set(),
+  cur: null,               // the world we are in
+  cand: [null, null],      // kin, stranger: the worlds behind the portals
+  doors: null,             // { z, born, chosen, auto } once the portals are open
+  look: { yaw: 0, pitch: 0, tyaw: 0, tpitch: 0, idle: 9 },
+  camOff: [0, 0], roll: 0,
+  fade: 0, fadeInk: [0, 0, 0],
+  clock: 0, frame: 0, paused: false, gentle: false,
+  journey: { seed: 1, step: 0, kinRun: 0, plates: [] },
+  on: {},                  // callbacks: arrive(world), doors(open), choose(k), cross(world), fail(msg)
+  stats: { fps: 0, ms: 0, compileMs: 0, px: 0, cost: 0 },
+  errors: [],
+  debug: 0, fixed: false,
+
+  init(canvas) {
+    const gl = GLX.init(canvas);
+    if (!gl) return false;
+    this.gl = gl; this.canvas = canvas;
+    // one lattice of random bytes drives all noise; fixed seed so every device agrees
+    const r = rngFrom(0x51ced), bytes = new Uint8Array(256 * 256 * 4);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (r() * 256) | 0;
+    this.noise = GLX.dataTexture(256, bytes, { linear: true });
+    this.dummy = GLX.dataTexture(1, new Uint8Array([0, 0, 0, 255]), { linear: false });
+    const head = '#version 300 es\n';
+    this.post = {
+      pre: GLX.program(head + GLSL['post/glowpre'], 'glowpre'),
+      blur: GLX.program(head + GLSL['post/blur'], 'blur'),
+      fin: GLX.program(head + GLSL['post/final'], 'final'),
+    };
+    canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); GLX.lost = true; if (this.on.lost) this.on.lost(); });
+    canvas.addEventListener('webglcontextrestored', () => { GLX.lost = false; this.rebuild(); });
+    return true;
+  },
+
+  // after a lost context every GL object is gone; worlds are rebuilt from their keys
+  rebuild() {
+    const keep = { cur: this.cur && this.cur.key, t: this.cur && this.cur.t, z: this.cur && this.cur.z };
+    this.progs.clear(); this.tg = null;
+    this.init(this.canvas); this.resize(true);
+    if (keep.cur) { this.goTo(keep.cur, { quiet: true }); }
+    if (this.on.restored) this.on.restored();
+  },
+
+  programFor(form) {
+    let p = this.progs.get(form);
+    if (!p) {
+      const src = '#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\n' +
+        GLSL['a-head'] + '\n' + GLSL['forms/' + form] + '\n' + GLSL['z-main'];
+      p = GLX.program(src, form);
+      this.progs.set(form, p);
+    }
+    return p;
+  },
+  compiling() { for (const p of this.progs.values()) if (p.state === 'compiling') return true; return false; },
+
+  // ---- sizes ----
+  resize(force) {
+    const c = this.canvas;
+    let cw, ch;
+    if (this.fixed) { cw = c.width; ch = c.height; }
+    else {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const box = c.getBoundingClientRect();
+      cw = Math.max(2, Math.round(box.width * dpr)); ch = Math.max(2, Math.round(box.height * dpr));
+      const cap = 3.7e6 / (cw * ch);
+      if (cap < 1) { cw = Math.round(cw * Math.sqrt(cap)); ch = Math.round(ch * Math.sqrt(cap)); }
+      if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+    }
+    const s = this.fixed ? 1 : Math.min(1, Math.sqrt(this.budget / (cw * ch)));
+    const rw = Math.max(2, Math.round(cw * s / 2) * 2), rh = Math.max(2, Math.round(ch * s / 2) * 2);
+    if (!force && this.tg && rw === this.rw && rh === this.rh && cw === this.cw && ch === this.ch) return;
+    this.cw = cw; this.ch = ch; this.rw = rw; this.rh = rh;
+    if (this.tg) for (const k in this.tg) GLX.freeTarget(this.tg[k]);
+    const o = { hdr: false, linear: true };
+    const gw = Math.max(2, rw >> 2), gh = Math.max(2, rh >> 2);
+    this.tg = {
+      scene: GLX.target(rw, rh, o), p0: GLX.target(rw, rh, { hdr: false, linear: false }), p1: GLX.target(rw, rh, { hdr: false, linear: false }),
+      ga: GLX.target(gw, gh, o), gb: GLX.target(gw, gh, o),
+    };
+    this.stats.px = rw * rh;
+  },
+
+  // ---- journeys ----
+  makeRecord(key) {
+    const g = WORLD.make(key);
+    return { key, g, prog: this.programFor(g.form), t: 0, ta: 0, z: 0, warmed: false, live: null };
+  },
+  // Go straight to a world, with a fade. Used at the start, for jumps and after failures.
+  goTo(key, opts = {}) {
+    this.cur = this.makeRecord(key);
+    this.cur.z = 0; this.cur.ta = 0;
+    this.cand = [null, null]; this.doors = null;
+    this.camOff = [0, 0]; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
+    this.fade = 0; this.arrived = false;
+    if (!opts.quiet) { this.journey.step = opts.step || 0; }
+    return this.cur;
+  },
+  childKeys(w) {
+    const j = this.journey, k = w.key;
+    const r = stream(mix32(j.seed ^ Math.imul(j.step + 1, 0x9e3779b1)), 'next');
+    const kin = { base: k.base, change: mix32((k.change || 0) + 0x632be5ab + j.step) || 1, heir: k.heir, age: (k.age || 0) + 1, gen: (k.gen || 0) + 1 };
+    let base = (r() * 4294967296) >>> 0;
+    const keepHeir = r() < 0.4;
+    const stranger = { base, change: 0, heir: keepHeir ? k.heir : (r() * 4294967296) >>> 0, age: keepHeir ? (k.age || 0) + 1 : 0, gen: (k.gen || 0) + 1 };
+    return [kin, stranger];
+  },
+  prepareCandidates() {
+    const [kk, sk] = this.childKeys(this.cur);
+    const kin = this.makeRecord(kk);
+    let stranger = this.makeRecord(sk);
+    // a stranger must not land on a form whose shader failed on this device
+    let tries = 0;
+    while (this.badForms.has(stranger.g.form) && tries++ < 12) { sk.base = mix32(sk.base + 977); stranger = this.makeRecord(sk); }
+    this.cand = [kin, stranger];
+  },
+
+  // ---- per frame ----
+  step(dt) {
+    const w = this.cur;
+    if (!w) return;
+    const st = GLX.ready(w.prog);
+    for (const p of this.progs.values()) {
+      if (p.state === 'compiling') {
+        GLX.ready(p);
+        if (p.state === 'compiling' && performance.now() - p.started > 25000) { p.state = 'failed'; p.error = 'compile timed out'; }
+      }
+    }
+    if (st === 'failed') { this.failWorld(w); return; }
+    if (st !== 'ready') return;
+    if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w); }
+    if (this.paused) dt = 0;
+    this.clock += dt; this.frame++;
+    this.fade = Math.min(1, this.fade + dt / 2.2);
+    const g = w.g;
+    w.t += dt; w.ta += dt;
+    for (const c of this.cand) if (c) c.t += dt;
+
+    // candidates: made a few seconds in, opened when both shaders are ready
+    if (!this.cand[0] && w.ta > 3) this.prepareCandidates();
+    if (this.cand[0] && !this.doors) {
+      for (let k = 0; k < 2; k++) {
+        const c = this.cand[k], s = GLX.ready(c.prog);
+        if (s === 'failed') { this.badForms.add(c.g.form); const keys = this.childKeys(w); keys[1].base = mix32(keys[1].base + 31 * this.badForms.size + w.ta * 1000); this.cand[k] = this.makeRecord(k ? keys[1] : keys[0]); }
+      }
+      const ready = this.cand.every((c) => c.prog.state === 'ready');
+      if (ready && (w.ta > g.doorsAt || this.hurry) && !this.linger) this.openDoors();
+    }
+
+    // flight
+    let pace = 1;
+    if (this.hurry && this.doors) pace = 3.2;
+    w.z += g.speed * pace * dt;
+
+    // looking around: springs back to the line of flight when left alone
+    const L = this.look;
+    L.idle += dt;
+    if (L.idle > 2.2) { L.tyaw = damp(L.tyaw, 0, 0.9, dt); L.tpitch = damp(L.tpitch, 0, 0.9, dt); }
+    L.yaw = damp(L.yaw, L.tyaw, 5, dt); L.pitch = damp(L.pitch, L.tpitch, 5, dt);
+
+    if (this.doors) this.stepDoors(dt);
+    if (w.z > 60000 && !this.doors && this.cand[0] && this.cand.every((c) => c.prog.state === 'ready')) this.openDoors();
+  },
+
+  openDoors() {
+    const w = this.cur, g = w.g;
+    const ahead = g.speed * 15;
+    const z = w.z + ahead;
+    const p = WORLD.pathAt(g, z);
+    const mk = (o) => ({ c: [p[0] + o[0], p[1] + o[1], z], r: g.door.r });
+    // hands-off, the flight takes kin twice and then a stranger
+    const auto = this.journey.kinRun >= 2 ? 1 : 0;
+    this.doors = { z, born: w.ta, auto, chosen: auto, picked: false, d: [mk(g.door.kin), mk(g.door.stranger)], open: 0, gaze: [0, 0] };
+    for (const c of this.cand) { c.t = 0; c.ta = 0; }
+    this.hurry = false;
+    if (this.on.doors) this.on.doors(this.cand);
+  },
+
+  stepDoors(dt) {
+    const w = this.cur, g = w.g, D = this.doors;
+    D.open = Math.min(1, D.open + dt / 3.5);
+    const left = D.z - w.z;
+    // turning to face a portal for a moment chooses it
+    const cam = this.camera(w);
+    for (let k = 0; k < 2; k++) {
+      const to = V.norm(V.sub(D.d[k].c, cam.pos));
+      const facing = V.dot(to, cam.fwdUser);
+      D.gaze[k] = damp(D.gaze[k], smooth(0.955, 0.995, facing), 3, dt);
+    }
+    if (this.look.idle < 2.2 && left > g.speed * 2.5) {
+      const pick = D.gaze[0] > 0.6 && D.gaze[0] > D.gaze[1] ? 0 : D.gaze[1] > 0.6 ? 1 : -1;
+      if (pick >= 0 && pick !== D.chosen) { D.chosen = pick; D.picked = true; if (this.on.choose) this.on.choose(pick); }
+    }
+    // the line of flight bends to pass through the centre of the chosen portal
+    const o = D.chosen === 0 ? g.door.kin : g.door.stranger;
+    const pull = 1 - smooth(g.speed * 2.5, g.speed * 10, left);
+    this.camOff[0] = damp(this.camOff[0], o[0] * pull, 2.5, dt);
+    this.camOff[1] = damp(this.camOff[1], o[1] * pull, 2.5, dt);
+    if (left <= 0) this.cross();
+  },
+
+  cross() {
+    const D = this.doors, w = this.cur, k = D.chosen;
+    const camA = this.camera(w);
+    const next = this.cand[k];
+    const C = D.d[k].c, E = WORLD.pathAt(next.g, 0);
+    // both worlds fly along +z and portals face +z, so the mapping is a translation
+    next.z = camA.pos[2] - C[2];
+    this.camOff = [camA.pos[0] - C[0], camA.pos[1] - C[1]];
+    next.ta = 0;
+    this.journey.step++;
+    this.journey.kinRun = k === 0 ? this.journey.kinRun + 1 : 0;
+    this.cur = next; this.cand = [null, null]; this.doors = null; this.hurry = false;
+    void E;
+    if (this.on.cross) this.on.cross(next, k);
+    if (this.on.arrive) this.on.arrive(next);
+  },
+
+  failWorld(w) {
+    this.badForms.add(w.g.form);
+    this.errors.push('world ' + w.g.form + ': ' + (w.prog.error || 'failed'));
+    if (this.badForms.size >= WORLD.formNames().length) { if (this.on.fail) this.on.fail('No world could be drawn on this device.'); this.cur = null; return; }
+    let key = { ...w.key }, tries = 0, rec;
+    do { key.base = mix32(key.base + 1013); key.change = 0; rec = this.makeRecord(key); } while (this.badForms.has(rec.g.form) && tries++ < 40);
+    this.cur = rec; this.cand = [null, null]; this.doors = null; this.arrived = false;
+  },
+
+  // ---- camera ----
+  camera(w) {
+    const g = w.g, z = w.z;
+    const p = WORLD.pathAt(g, z);
+    const settle = Math.exp(-Math.max(0, w.ta) * 0.9);     // offsets carried through a portal ease away
+    const off = this.doors ? this.camOff : [this.camOff[0] * settle, this.camOff[1] * settle];
+    const pos = [p[0] + off[0], p[1] + off[1], z];
+    const lead = g.lead;
+    const q = WORLD.pathAt(g, z + lead);
+    let tgt = [q[0], q[1] + g.tilt * lead, z + lead];
+    // attention drifts to the set piece as it comes up, then lets go
+    const live = w.live || (w.live = WORLD.live(g, w.ta, w.t));
+    if (g.set.type && g.set.attend > 0) {
+      const sp = [live.set[0], live.set[1] + g.set.eye * g.set.scale, live.set[2]];
+      const dz = sp[2] - z;
+      const a = g.set.attend * smooth(g.speed * 16, g.speed * 9, dz) * smooth(g.set.scale * 1.2, g.set.scale * 5, dz);
+      const dir = V.norm(V.sub(sp, pos)), base = V.norm(V.sub(tgt, pos));
+      tgt = V.add(pos, V.norm(V.mix(base, dir, a)));
+    }
+    if (this.doors) {
+      const D = this.doors, c = D.d[D.chosen].c, left = D.z - z;
+      const a = 0.75 * smooth(g.speed * 13, g.speed * 5, left) * D.open;
+      const dir = V.norm(V.sub(c, pos)), base = V.norm(V.sub(tgt, pos));
+      tgt = V.add(pos, V.norm(V.mix(base, [dir[0], dir[1], Math.max(dir[2], 0.2)], a)));
+    }
+    let f = V.norm(V.sub(tgt, pos));
+    const fwdBase = f;
+    // the viewer's own look, on top
+    const L = this.look;
+    const yaw = Math.atan2(f[0], f[2]) + L.yaw, pitch = Math.asin(clamp(f[1], -1, 1)) + L.pitch;
+    f = [Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)];
+    // bank a little into the bends of the line
+    const bend = (WORLD.pathAt(g, z + 30)[0] - 2 * WORLD.pathAt(g, z + 15)[0] + p[0]) / 225;
+    const roll = this.gentle ? 0 : clamp(-bend * g.speed * g.speed * 0.02, -0.12, 0.12);
+    let r = V.norm(V.cross(f, [0, 1, 0]));
+    let u = V.cross(r, f);
+    const cr = Math.cos(roll), sr = Math.sin(roll);
+    const r2 = V.add(V.mul(r, cr), V.mul(u, sr)), u2 = V.sub(V.mul(u, cr), V.mul(r, sr));
+    const aspect = this.rw / this.rh;
+    const focal = g.focal * (aspect < 1.2 ? Math.pow(aspect / 1.2, 0.55) : 1);
+    return { pos, fwd: fwdBase, fwdUser: f, right: r2, up: u2, focal, aspect };
+  },
+
+  // ---- drawing ----
+  setWorld(w, cam, { clip = null, doors = null, steps } = {}) {
+    const g = w.g, gl = this.gl;
+    const live = w.live = WORLD.live(g, w.ta, w.t);
+    GLX.use(w.prog);
+    GLX.tex('uNoise', 0, this.noise);
+    GLX.v2('uRes', this.rw, this.rh);
+    GLX.v3('uCamP', cam.pos); GLX.v3('uCamR', cam.right); GLX.v3('uCamU', cam.up);
+    GLX.v3('uCamF', V.mul(cam.fwdUser, cam.focal));
+    GLX.f('uPix', 2 / (this.rh * cam.focal));
+    GLX.f('uTime', w.t % 3600); GLX.i('uZero', 0);
+    GLX.v3v('uInk[0]', live.inks);
+    GLX.v3('uSunDir', live.sunDir);
+    GLX.v4('uSun', ...live.sun); GLX.v4('uAir', ...live.air); GLX.v4('uSea', ...live.sea);
+    GLX.v4('uPathA', g.path.ax, g.path.fx, g.path.px, g.path.ay);
+    GLX.v4('uPathB', g.path.fy, g.path.py, g.path.y0, 0);
+    GLX.fv('uTr[0]', live.tr);
+    GLX.v4('uSet', live.set[0], live.set[1], live.set[2], g.set.scale);
+    GLX.v4('uSetK', g.set.type, g.set.yaw, live.setMotion, live.setLit);
+    GLX.v4('uEv', live.ev, g.ev.id, 0, 0);
+    GLX.v4('uSky', ...live.sky);
+    gl.uniform4fv(GLX.loc('uBody[0]') || null, live.body);
+    gl.uniform4fv(GLX.loc('uBodyK[0]') || null, live.bodyK);
+    GLX.v4('uPart', ...live.part);
+    if (clip) { GLX.v4('uClip', clip[0], clip[1], clip[2], clip[3]); GLX.f('uClipOn', 1); } else GLX.f('uClipOn', 0);
+    const pc = new Float32Array(8), pn = new Float32Array(8), pk = new Float32Array(6);
+    if (doors) {
+      for (let k = 0; k < 2; k++) {
+        const d = doors.d[k];
+        pc.set([d.c[0], d.c[1], d.c[2], d.r], k * 4);
+        pn.set([0, 0, 1, doors.open * (0.9 + 0.1 * Math.sin(w.t * 0.7 + k * 2))], k * 4);
+        const ink = this.cand[k] ? this.cand[k].g.doorInk : [1, 1, 1];
+        const hot = doors.chosen === k ? 1 : 0.72;
+        pk.set([ink[0] * hot, ink[1] * hot, ink[2] * hot], k * 3);
+      }
+      GLX.tex('uPortTex0', 1, this.tg.p0.tex); GLX.tex('uPortTex1', 2, this.tg.p1.tex);
+    } else {
+      GLX.tex('uPortTex0', 1, this.dummy); GLX.tex('uPortTex1', 2, this.dummy);
+    }
+    gl.uniform4fv(GLX.loc('uPortC[0]') || null, pc);
+    gl.uniform4fv(GLX.loc('uPortN[0]') || null, pn);
+    gl.uniform3fv(GLX.loc('uPortInk[0]') || null, pk);
+    const q = this.quality;
+    GLX.v4('uQ', steps || q.steps, q.reflect, q.shadow, this.debug);
+  },
+
+  // screen rectangle that contains a portal, in pixels of the world pass; null when off screen
+  doorRect(cam, d, open) {
+    const R = d.r * open * 1.06;
+    if (R <= 0.01) return null;
+    const v = V.sub(d.c, cam.pos);
+    const depth = V.dot(v, cam.fwdUser);
+    if (V.len(v) < R * 2.2) return [0, 0, this.rw, this.rh];
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * TAU, p = [v[0] + Math.cos(a) * R * 1.09, v[1] + Math.sin(a) * R * 1.09, v[2]];
+      const zc = V.dot(p, cam.fwdUser);
+      if (zc < 0.2) { if (depth < 0) return null; return [0, 0, this.rw, this.rh]; }
+      const x = (V.dot(p, cam.right) * cam.focal / zc) * this.rh / 2 + this.rw / 2;
+      const y = (V.dot(p, cam.up) * cam.focal / zc) * this.rh / 2 + this.rh / 2;
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    x0 = Math.max(0, Math.floor(x0) - 2); y0 = Math.max(0, Math.floor(y0) - 2);
+    x1 = Math.min(this.rw, Math.ceil(x1) + 2); y1 = Math.min(this.rh, Math.ceil(y1) + 2);
+    if (x1 <= x0 || y1 <= y0) return null;
+    return [x0, y0, x1 - x0, y1 - y0];
+  },
+
+  render() {
+    const gl = this.gl, w = this.cur;
+    if (!w || w.prog.state !== 'ready' || GLX.lost) return false;
+    for (const k in this.post) if (GLX.ready(this.post[k]) !== 'ready') return false;
+    const cam = this.camera(w), D = this.doors;
+    // 1. what lies through each portal, only where the portal is on screen
+    if (D) {
+      for (let k = 0; k < 2; k++) {
+        const c = this.cand[k], rect = this.doorRect(cam, D.d[k], D.open);
+        if (!c || !rect) continue;
+        const E = WORLD.pathAt(c.g, 0), C = D.d[k].c;
+        const camB = { ...cam, pos: [cam.pos[0] - C[0] + E[0], cam.pos[1] - C[1] + E[1], cam.pos[2] - C[2]] };
+        const far = rect[2] * rect[3] < this.rw * this.rh * 0.04;
+        this.setWorld(c, camB, { clip: [0, 0, 1, 0], steps: far ? Math.round(this.quality.steps * 0.6) : 0 });
+        GLX.draw(k ? this.tg.p1 : this.tg.p0, this.rw, this.rh, rect);
+      }
+    }
+    // 2. the world itself
+    this.setWorld(w, cam, { doors: D });
+    GLX.draw(this.tg.scene, this.rw, this.rh);
+    // 3. glow: quarter size, blurred twice
+    const ga = this.tg.ga, gb = this.tg.gb;
+    GLX.use(this.post.pre); GLX.tex('uSrc', 0, this.tg.scene.tex); GLX.v2('uTexel', 1 / ga.w, 1 / ga.h); GLX.draw(ga, ga.w, ga.h);
+    GLX.use(this.post.blur);
+    for (let i = 0; i < 2; i++) {
+      GLX.tex('uSrc', 0, ga.tex); GLX.v2('uTexel', 1 / ga.w, 1 / ga.h); GLX.v2('uDir', 1 + i, 0); GLX.draw(gb, gb.w, gb.h);
+      GLX.tex('uSrc', 0, gb.tex); GLX.v2('uDir', 0, 1 + i); GLX.draw(ga, ga.w, ga.h);
+    }
+    // 4. to the screen
+    GLX.use(this.post.fin);
+    GLX.tex('uSrc', 0, this.tg.scene.tex); GLX.tex('uGlow', 1, ga.tex); GLX.tex('uNoise', 2, this.noise);
+    GLX.v2('uOut', this.cw, this.ch);
+    GLX.v4('uK', 0.9, this.debug ? 0 : 0.05, this.fixed ? 1 : this.fade, 0);
+    GLX.v3('uFadeInk', w.g.inks.paper);
+    GLX.draw(null, this.cw, this.ch);
+    return true;
+  },
+
+  // ---- the governor: holds the frame rate by changing how many pixels are marched ----
+  gov: { acc: 0, n: 0, hold: 0, wait: 2, lastUp: 0, floor: 1 / 60, seen: [] },
+  govern(dt) {
+    const G = this.gov;
+    if (this.fixed || this.paused || this.compiling() || dt > 0.5) { G.acc = 0; G.n = 0; return; }
+    G.acc += dt; G.n++;
+    if (G.acc < 0.8) return;
+    const avg = G.acc / G.n; G.acc = 0; G.n = 0;
+    // learn the display's own frame time from the fastest window seen
+    G.seen.push(avg); if (G.seen.length > 40) G.seen.shift();
+    G.floor = Math.max(1 / 144, Math.min(...G.seen, 1 / 30));
+    this.stats.fps = 1 / avg;
+    const target = Math.max(G.floor * 1.12, 1 / 58);
+    if (avg > target * 1.18) {
+      this.budget = Math.max(this.budgetMin, this.budget * (avg > target * 1.8 ? 0.6 : 0.82));
+      G.hold = 0; G.wait = Math.min(G.wait * 1.6, 40);
+      this.resize();
+    } else if (avg < target * 1.04) {
+      G.hold += 0.8;
+      if (G.hold >= G.wait && this.budget < this.budgetMax && this.rw < this.cw) {
+        this.budget = Math.min(this.budgetMax, this.budget * 1.15); G.hold = 0; this.resize();
+      }
+    } else G.hold = 0;
+  },
+};
+
+// ---- 90-main.js
+// ---------- start ----------
+const Q = new URLSearchParams(location.search);
+const qn = (k, d) => (Q.has(k) && Number.isFinite(+Q.get(k)) ? +Q.get(k) : d);
+const $ = (id) => document.getElementById(id);
+
+function boot() {
+  const canvas = $('view');
+  const shot = Q.has('shot');
+  if (shot) {
+    // deterministic stills for the test harness: fixed size, no clock but ours
+    document.body.classList.add('bleed');
+    canvas.width = qn('w', 640); canvas.height = qn('h', 360);
+    canvas.style.cssText = `position:fixed;left:0;top:0;width:${canvas.width}px;height:${canvas.height}px`;
+    ENG.fixed = true;
+  }
+  if (!ENG.init(canvas)) { $('veil-sub').textContent = 'this browser cannot draw the worlds (WebGL 2 is missing)'; window.__ks = { error: 'nowebgl2' }; return; }
+  ENG.debug = qn('debug', 0);
+  if (Q.has('steps')) ENG.quality.steps = qn('steps', 96);
+  ENG.resize(true);
+  const seed = Q.has('seed') ? (codeToSeed(Q.get('seed')) ?? 1) : (Math.random() * 4294967296) >>> 0;
+  ENG.journey.seed = qn('journey', seed);
+  const key = { base: seed, change: qn('change', 0) >>> 0, heir: seed, age: 0, gen: 0 };
+  if (Q.has('form')) key.form = Q.get('form');
+  if (Q.has('pal')) key.pal = Q.get('pal');
+  ENG.goTo(key);
+
+  ENG.on.arrive = (w) => { $('veil').classList.add('gone'); };
+  window.addEventListener('resize', () => ENG.resize());
+
+  if (shot) {
+    // window.__ks: stepTo(seconds) simulates with a fixed step and draws one frame
+    const hooks = window.__ks = {
+      ready: false, errors: ENG.errors,
+      async wait() {
+        for (let i = 0; i < 3000; i++) {
+          ENG.step(0);
+          if (ENG.cur && ENG.cur.prog.state === 'ready' && ENG.render()) { hooks.ready = true; return true; }
+          if (!ENG.cur) return false;
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        return false;
+      },
+      stepTo(t, dt = 1 / 20) {
+        while (ENG.cur && ENG.cur.ta + ENG.journeyClockOffset() < t - 1e-6) ENG.step(Math.min(dt, t - ENG.cur.ta - ENG.journeyClockOffset()));
+        return ENG.render();
+      },
+      advance(sec, dt = 1 / 20) { for (let t = 0; t < sec - 1e-6; t += dt) ENG.step(dt); return ENG.render(); },
+      draw() { return ENG.render(); },
+      look(yaw, pitch) { ENG.look.tyaw = ENG.look.yaw = yaw; ENG.look.tpitch = ENG.look.pitch = pitch; ENG.look.idle = 0; },
+      info() {
+        const w = ENG.cur; if (!w) return null;
+        return { form: w.g.form, pal: w.g.pal.name, ta: w.ta, z: w.z, doors: !!ENG.doors, step: ENG.journey.step, key: w.key, name: w.g.name, line: w.g.line, set: w.g.set.type, ev: w.g.ev.type,
+          cands: ENG.cand.map((c) => c && { form: c.g.form, pal: c.g.pal.name, state: c.prog.state }), rw: ENG.rw, rh: ENG.rh, compile: w.prog.compileMs };
+      },
+      // mean and max of the red channel: with ?debug=1 that is march cost / 200
+      pixels() {
+        const gl = ENG.gl, w = canvas.width, h = canvas.height, px = new Uint8Array(w * h * 4);
+        ENG.render(); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        let r = 0, g = 0, b = 0, mx = 0, black = 0, over = 0;
+        for (let i = 0; i < px.length; i += 4) { r += px[i]; g += px[i + 1]; b += px[i + 2]; mx = Math.max(mx, px[i]); if (px[i] + px[i + 1] + px[i + 2] < 6) black++; if (px[i + 1] > 250 && px[i] < 5) over++; }
+        const n = w * h;
+        return { r: r / n, g: g / n, b: b / n, max: mx, black: black / n, over: over / n };
+      },
+    };
+    ENG.journeyClockOffset = () => 0;
+    hooks.wait();
+    return;
+  }
+
+  let last = performance.now();
+  const loop = (now) => {
+    const dt = Math.min(0.1, (now - last) / 1000); last = now;
+    ENG.step(dt); ENG.render(); ENG.govern(dt);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+window.addEventListener('error', (e) => { ENG.errors.push(String(e.message)); });
+boot();
+
+})();
+</script>
+</body>
+</html>
