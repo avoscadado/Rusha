@@ -36,7 +36,7 @@ vec3 sky(vec3 rd, out float glow) {
     if (r.x > 1.0 - 0.07 * uSky.z) {
       float d = length(fract(u) - 0.5 - (r.yz - 0.5) * 0.7);
       float rad = max(0.035 + 0.05 * r.w, uPix * 30.0);
-      c = mix(c, uInk[PAPER], smoothstep(rad, rad * 0.45, d) * smoothstep(0.0, 0.25, e) * (0.45 + 0.55 * r.w));
+      c = mix(c, uInk[PAPER], (1.0 - smoothstep(rad * 0.45, rad, d)) * smoothstep(0.0, 0.25, e) * (0.45 + 0.55 * r.w));
     }
   }
   // moons: flat discs with a hard terminator
@@ -47,7 +47,7 @@ vec3 sky(vec3 rd, out float glow) {
     vec3 dl = rd - dir;
     float d = length(dl);
     float aa = uPix * 1.2;
-    float disc = smoothstep(r + aa, r - aa, d);
+    float disc = (1.0 - smoothstep(r - aa, r + aa, d));
     if (disc > 0.0) {
       vec3 side = normalize(cross(dir, vec3(0.0, 1.0, 0.0)));
       float ph = uBodyK[i].x;
@@ -62,14 +62,14 @@ vec3 sky(vec3 rd, out float glow) {
       vec2 q = vec2(dot(dl, sx), dot(dl, sy) * 3.6) / r;
       float ring = abs(length(q) - 1.75);
       float hide = disc * step(0.0, dot(dl, sy));
-      c = mix(c, uInk[PAPER], smoothstep(0.16, 0.08, ring) * (1.0 - hide) * 0.8);
+      c = mix(c, uInk[PAPER], (1.0 - smoothstep(0.08, 0.16, ring)) * (1.0 - hide) * 0.8);
     }
     }
   }
   // the sun
   if (uSunDir.y > -0.05) {
     float d = length(rd - uSunDir), aa = uPix * 1.2;
-    float disc = smoothstep(uSun.x + aa, uSun.x - aa, d);
+    float disc = (1.0 - smoothstep(uSun.x - aa, uSun.x + aa, d));
     c = mix(c, mix(uInk[PAPER], uInk[GLOW], 0.25), disc);
     glow = max(glow, disc);
   }
@@ -81,7 +81,7 @@ vec3 sky(vec3 rd, out float glow) {
       float fi = float(i);
       float h = uSky.w * (1.0 - 0.27 * fi) * (0.25 + 0.75 * vnoise1(az * (5.0 + 4.0 * fi) + 19.0 * fi + 3.0))
               + uSky.w * 0.12 * vnoise1(az * (23.0 + 9.0 * fi) + 7.0 * fi);
-      float m = smoothstep(h + uPix, h - uPix, e);
+      float m = (1.0 - smoothstep(h - uPix, h + uPix, e));
       c = mix(c, mix(hz, uInk[SHADE], 0.16 + 0.17 * fi), m);
       glow *= 1.0 - m;
     }
@@ -123,7 +123,7 @@ vec3 calcN(vec3 p, float h, out float cav) {
     n += e * d; s += d;
   }
   cav = s / (4.0 * h);                                     // > 0 on ridges, < 0 in creases
-  return normalize(n);
+  return normalize(n + vec3(0.0, 1e-7, 0.0));
 }
 
 // ray against an upright disc; returns distance or -1
@@ -158,13 +158,16 @@ void main() {
   for (int b = uZero; b < 2; b++) {
     // what bounds this ray: the far plane, the sea, a portal
     float tMax = FAR; int stop = 0; float rr = 0.0; int pi = 0;
+    bool under = false;
     if (uSea.x > 0.5 && rd.y < -1e-4) {
       float ts = (uSea.y - ro.y) / rd.y;
       if (ts > tMin && ts < tMax) { tMax = ts; stop = 1; }
     }
+    // a view through a door whose lower edge is under this world's water starts in the water
+    if (uSea.x > 0.5 && uSea.x < 2.5 && uClipOn > 0.5 && b == 0 && ro.y + rd.y * tMin < uSea.y) { tMax = tMin; stop = 1; under = true; }
     for (int k = uZero; k < 2; k++) {
       float r1; float tp = discHit(ro, rd, uPortC[k], uPortN[k], r1);
-      if (tp > tMin && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }
+      if (tp > 0.0 && tp < tMax) { tMax = tp; stop = 2; rr = r1; pi = k; }
     }
     // the march
     float t = tMin, pd = 1e9, edge = 0.0; bool hit = false, spent = true;
@@ -187,7 +190,7 @@ void main() {
     } else if (hit && t < tMax) {
       vec3 p = ro + rd * t;
       float cav; vec3 n = calcN(p, max(0.9 * uPix * t, 0.003), cav);
-      n -= max(0.0, dot(n, rd)) * rd; n = normalize(n);
+      n -= max(0.0, dot(n, rd)) * rd; n = normalize(n - 1e-5 * rd);
       Surf s = surf(p, n, t);
       if (uEv.z > 0.001) {                                  // snow lies on whatever faces up
         float k = uEv.z * smoothstep(0.5, 0.78, n.y);
@@ -204,7 +207,7 @@ void main() {
           // real surfaces only (a cell wall casts no shadow); the closest approach is estimated
           // from this sample and the last, which keeps penumbras free of contour lines
           // (only while the distance is changing smoothly: across a cell wall it can jump)
-          float y = gD < 1.8 * ph ? gD * gD / (2.0 * ph) : 0.0, dd = sqrt(max(gD * gD - y * y, 0.0));
+          float y = gD < 1.8 * ph ? gD * gD / (2.0 * max(ph, 1e-4)) : 0.0, dd = sqrt(max(gD * gD - y * y, 0.0));
           sh = min(sh, uSun.w * dd / max(st - y, 1e-3));
           ph = gD;
           st += clamp(d, 0.02 + 0.01 * st, SHFAR * 0.12);
@@ -236,7 +239,7 @@ void main() {
       c = mix(c, uInk[DEEP], 0.7 * edge);
       if (b == 0) tHitP = t;
       // ground mist, then the stepped planes of haze
-      float mist = (1.0 - exp(-t * uAir.w)) * smoothstep(uAir.z, uAir.z - 5.0, p.y);
+      float mist = (1.0 - exp(-t * uAir.w)) * (1.0 - smoothstep(uAir.z - 5.0, uAir.z, p.y));
       c = mix(c, mix(hazeInk(rd), uInk[PAPER], 0.45), mist);
       float hz = hazeStep(travelled + t);
       c = mix(c, hazeInk(rd), hz * 0.94);
@@ -276,7 +279,7 @@ void main() {
         float stroke = smoothstep(0.71, 0.74, w1) * smoothstep(0.35, 0.5, w2) * rp * fine;
         vec3 body = mix(mix(uInk[SHADE], uInk[TOP], 0.5), hazeInk(rd), far * 0.94);
         body = mix(body, mix(uInk[PAPER], uInk[GLOW], 0.4), stroke * 0.5 * (1.0 - far));
-        if (b == 0 && uQ.y > 0.5) {
+        if (b == 0 && uQ.y > 0.5 && !under) {
           float nearK = 0.4 * (1.0 - smoothstep(4.0, 70.0, dist));              // the foreground is printed a tone deeper
           fr *= 1.0 - nearK;
           acc += wgt * (1.0 - fr) * body;
@@ -321,7 +324,7 @@ void main() {
       vec3 f = fract(q) - 0.5 - (r.xyz - 0.5) * 0.6;
       f.y /= mix(1.0, 0.18, rain);
       float size = (0.035 + 0.05 * r.x) * uPart.w * mix(1.0, 0.45, rain) / cs * (1.0 + 20.0 * uPix * dk);
-      float m = smoothstep(size, size * 0.6, length(f.xy * vec2(1.0, mix(1.0, 0.1, rain)))) * step(r.w, uPart.y);
+      float m = (1.0 - smoothstep(size * 0.6, size, length(f.xy * vec2(1.0, mix(1.0, 0.1, rain))))) * step(r.w, uPart.y);
       vec3 ink = uPart.x < 2.5 ? uInk[PAPER] : (uPart.x < 3.5 ? mix(uInk[ACCENT], uInk[PAPER], 0.35) : mix(uInk[PAPER], uInk[LOW], 0.5));
       acc = mix(acc, ink, m * (uPart.x > 1.5 && uPart.x < 2.5 ? 0.6 : 0.9) * mix(1.0, 0.5, rain));
       }

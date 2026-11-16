@@ -8,30 +8,30 @@ FORMS.terraces = {
   build(g, S) {
     const r = S('terraces');
     const T = r.pick([3, 3, 4, 4, 5, 6, 8]);
-    const H = r.range(50, 140);
+    const H = r.range(85, 160);
     const slope = r.range(0.32, 1.15);
-    const run = H / slope;
+    let run = H / slope;
     let W = r.range(12, 34);
-    const cove = r.chance(0.75) ? r.range(12, 55) : 0;
+    const cove = r.chance(0.75) ? r.range(10, 34) : 0;
     const wave = r.range(230, 420);
-    const c1 = r.range(0.45, 0.8);
+    const c1 = r.range(0.4, 0.7);
     const lean = r.range(0, 1.8);
-    const spur = r.chance(0.8) ? r.range(25, 90) : 0, ks = TAU / r.range(150, 320);
+    const ks = TAU / r.range(150, 320), spur = r.chance(0.8) ? Math.min(r.range(20, 52), 1.5 / ks) : 0;
     const wet = r.weighted([[0, 3], [1, 3.5], [0.5, 2.5]]);
     const huts = r.chance(0.6) ? r.range(0.3, 0.75) : 0;
     g.speed = r.range(12, 18); g.lead = 90; g.focal = 2.0;
     const P = g.path;
     P.ax = r.range(14, 55); P.fx = TAU / r.range(520, 900); P.px = r.range(0, TAU);
-    P.y0 = Math.max(11, H * r.range(0.1, 0.5));
+    P.y0 = Math.max(11, H * r.range(0.1, 0.4));
     P.ay = r.range(0, 1.5); P.fy = TAU / r.range(300, 500); P.py = r.range(0, TAU);
     const doorR = 5.5;
     // one set piece on the valley floor, beside the line or across it; a narrow valley takes only the slim ones
-    const hasSet = r.chance(0.4);
+    const rs = S('terraces set'), hasSet = rs.chance(0.36);
     let type = 0, scale = 10, onLine = false, hw = 1;
     if (hasSet) {
-      type = r.pick(W > 22 ? [1, 2, 3, 4, 5, 6, 7, 8, 8] : [1, 3, 4, 4, 6, 8]);
+      type = rs.pick(W > 22 ? [1, 2, 3, 4, 5, 6, 7, 8, 8] : [1, 3, 4, 4, 6, 8]);
       [hw, onLine] = this.SETW[type];
-      scale = onLine ? r.range(8, 13) : clamp((W - 5) / (2 * hw), 5, r.range(9, 15));
+      scale = onLine ? rs.range(8, 13) : clamp((W - 5) / (2 * hw), 5, rs.range(9, 15));
       if (type === 3) P.y0 = 1.55 * scale;
       if (type === 1) P.y0 = Math.min(P.y0, 2.0 * scale);
       if (type === 6) P.y0 = Math.min(P.y0, 1.5 * scale);
@@ -60,7 +60,10 @@ FORMS.terraces = {
       p1 = Math.max(p1, 6 * b * (1 - b) * b1); p2 = Math.max(p2, Math.abs(6 * (1 - 2 * b) * b1 * b1 + 6 * b * (1 - b) * b2));
     }
     const K = 1 / wave, nG = 2.12 * K, nH = 10.5 * K * K, ps = P.ax * P.fx;
-    const ds = (Math.hypot(1, ps + 0.5 * spur * ks) + cove * nG) / run, hs = (P.ax * P.fx * P.fx + 0.5 * spur * ks * ks + cove * nH) / run;
+    // no hillside steeper than two in one, however the spurs and the bends of the valley fall together
+    const lat = Math.hypot(1, ps + 0.5 * spur * ks) + cove * nG;
+    run = Math.max(run, H * (p1 * lat + c1 * nG * run) / 2);
+    const ds = lat / run, hs = (P.ax * P.fx * P.fx + 0.5 * spur * ks * ks + cove * nH) / run;
     const G = H * (p1 * ds + c1 * nG);
     const C = H * (p2 * ds * ds + p1 * hs + 2 * p1 * c1 * ds * nG + c1 * nH);
     g.tr.set([T, H, W, cove, run, K, lean, c1, wet, huts, 1 / Math.hypot(1, G), C, ks, 0, r.pick([0, 1, 1]), spur]);
@@ -72,8 +75,8 @@ FORMS.terraces = {
     g.facts = { T, shelves: Math.round((0.9 * H) / T), floor: Math.round(2 * W), wet, water, drowned, huts: huts > 0, steep: slope > 0.85,
       under: dry ? 0 : Math.floor(level / T + 0.05) };
     if (hasSet) {
-      const z = g.speed * r.range(25, 30);
-      const side = (r.chance(0.5) ? 1 : -1) * (hw * scale + r.range(4, 6));
+      const z = g.speed * rs.range(22, 27);
+      const side = (rs.chance(0.5) ? 1 : -1) * (hw * scale + rs.range(4, 6));
       const x0 = P.ax * Math.sin(z * P.fx + P.px), tan = P.ax * P.fx * Math.cos(z * P.fx + P.px);
       g.set = { type, pos: [x0 + (onLine ? 0 : side), dry ? 0 : level - 0.05, z], scale, yaw: -Math.atan(tan), attend: onLine ? 0.15 : 0.7, eye: 2, move: 0, lit: 0 };
       g.ev = { id: 1, type: 'rise', t0: 9, dur: 13 };
@@ -81,7 +84,7 @@ FORMS.terraces = {
     } else {
       const pick = r.weighted([['none', 3], ['lights', huts && g.pal.hour !== 2 ? 4 : 0], ['mist', dry ? 2.5 : water === 'lake' ? 0.8 : 0], ['snow', 1.6],
         ['tide', water === 'lake' ? 3 : 0], ['sunset', g.pal.hour === 1 ? 4 : 0]]);
-      if (pick === 'lights') g.ev = { id: 2, type: 'lights', t0: 8, dur: 30 };
+      if (pick === 'lights') { g.ev = { id: 2, type: 'lights', t0: 8, dur: 30 }; g.facts.lamps = true; }
       else if (pick === 'mist') g.ev = { id: 3, type: 'mist', t0: 12, dur: 24 };
       else if (pick === 'snow') g.ev = { id: 4, type: 'snow', t0: 10, dur: 22 };
       else if (pick === 'sunset') g.ev = { id: 5, type: 'sunset', t0: 8, dur: 34, toPal: r.pick(['Lamp Black', 'Indigo Vat', 'Mulberry Night', 'Prussian']) };
@@ -111,7 +114,7 @@ FORMS.terraces = {
       name = f.tide === 'up' ? 'The Lake Rising' : 'Low Water at the Terraces';
       bits.push(`A lake lies on the valley floor and the shelves go up from it ${numWord(f.T)} metres at a time.`);
       bits.push(f.tide === 'up' ? `The water takes ${n} while you are here.` : `The water goes down and gives back ${n}.`);
-    } else if (ev === 'lights') {
+    } else if (f.lamps) {
       name = 'Lamps on the Shelves';
       bits.push(`${cap(numWord(f.shelves))} shelves go up each side, each ${each}.`);
       bits.push('There is a house on a few of them. The lamps come on one at a time.');

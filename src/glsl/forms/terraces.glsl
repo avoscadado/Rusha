@@ -18,16 +18,20 @@
 //   uTr[14] valley floor: 0 bare, 1 a road               uTr[15] spurs: how far the coves between them go back
 // ---------------------------------------------------------------------------
 #define FAR 1900.0
-#define STEPK 0.9
+#define STEPK 0.9        // not a heightfield march: map() returns how far the ray can go to the next contour
 #define SHFAR 340.0
 #define LODPX 7.0        // a riser is never drawn thinner than this many pixels: far shelves merge instead
 #define HCELL 72.0       // one hut at most in a square of this size
 #define HTALL 7.0        // nothing built stands higher than this above its shelf
 
+// gD, the distance z-main rules its grazing ink lines from, is set to the built things only (set piece, huts):
+// the shelves rule their own lips and creases in surf(), evenly, where a grazing test along a stepped hill would stutter.
 float gU;                // sideways distance from the flight line at the last rawG()
 vec3 gHq;                // the last hut, in its own frame: x downhill, y up from its floor, z along the shelf
 vec4 gHr;                // and its lattice randoms
 bool gFree;              // the last walk() met nothing
+vec3 gSunO;              // where the shadow ray being marched began
+float gSunOn = 0.0;      // 1 while a shadow ray is being marched
 
 // the smooth height before it is cut into shelves, and its gradient
 vec3 rawG(vec2 x) {
@@ -146,48 +150,55 @@ float map(vec3 p) {
   float g = length(R.yz);
   float sp = setPiece(p);
   bool huts = uTr[9] > 0.001 && sh.z > 0.01;
+  // z-main takes the normal with no ray set, then marches toward the sun: so the first sample of that march can be told
+  bool sun = gRd == uSunDir;
+  if (!sun) gSunOn = 0.0;
+  else if (gSunOn < 0.5) { gSunO = p; gSunOn = 1.0; }
   float d;
   if (A < 0.0) {
     // inside the ground: the nearer of the tread overhead and the riser in front
     float m = floor(p.y / Te), jn = m + 1.0;
     if (mod(jn, 2.0) > 0.5 && p.y - Te * m >= Te * (1.0 - sh.y)) jn += 1.0;
     d = jn < 0.5 ? A : max(A, (Te * jn - R.x) / max(g, 1e-5));
-    gD = min(d, sp);
-    return gD;
+    gD = sp;
+    return min(d, sp);
   }
   // outside: never more than the true distance to the stack
   float d1 = Te * (j0 + 1.0) - R.x, d2 = d1 + Te;
   float B1 = 2.0 * d1 / (g + sqrt(g * g + 2.0 * C * d1));
   float B2 = 2.0 * d2 / (g + sqrt(g * g + 2.0 * C * d2));
   d = min(A, max(max(B1, min(p.y - topOf(j0 + 1.0, sh), B2)), (p.y - R.x) * uTr[10]));
-  if (dot(gRd, gRd) < 0.5) {                            // no ray: a plain distance, for the normal
+  if (dot(gRd, gRd) < 0.5) {
+    // no ray: a plain distance for the normal, to first order so that a riser's face comes out flat
+    float gs = max(g, 1e-5);
+    d = min(A, max(d1 / gs, min(p.y - topOf(j0 + 1.0, sh), d2 / gs)));
     if (huts) d = min(d, hutD(p, sh.z, d));
-    gD = min(d, sp);
-    return gD;
+    gD = sp;
+    return min(d, sp);
   }
   float st = max(max(d, walk(p, R, sh, j0, 0.0)), openAir(p, u, 0.0));
-  bool sun = gRd == uSunDir;
-  // A shadow ray that has nothing in front of it may go as far as it is above the ground: landing inside a
-  // hill is as good as meeting it, and the ray is not then taken to be grazing something it is nowhere near.
-  if (sun && gFree) st = max(st, 0.8 * A);
+  // A shadow ray is in shadow when it lands inside the ground, and z-main also darkens it wherever the step
+  // returned is small beside the distance gone. Here a small step only means the bounds are cautious, so a
+  // shadow ray never takes less than a fraction of the way it has come: shadows are cut hard, as on a block.
+  if (sun) st = max(st, max(gFree ? 0.8 * A : 0.0, 0.075 * length(p - gSunO)));
   if (huts) {
     if (sun) {
       // a shadow ray: a hut shades its own cell and no further, so that no step here is cut short by a cell wall
       st = min(st, hutD(p, sh.z, st));
-      gD = min(st, sp);
-      return gD;
+      gD = sp;
+      return min(st, sp);
     }
     // near the ground a hut may stand in the way: go cell by cell there, and stay clear of it from above
     float sc = walk(p, R, sh, j0, HTALL);
     if (A < HTALL + 1.5 || sc < 1.0) {
       vec2 q = p.xz - (floor(p.xz / HCELL) + 0.5) * HCELL;
-      float dh = min(hutD(p, sh.z, st), cellExit(q, HCELL));
-      gD = min(min(d, dh), sp);
-      return min(min(st, dh), sp);
+      float dh = hutD(p, sh.z, st);
+      gD = min(dh, sp);
+      return min(min(st, dh), min(cellExit(q, HCELL), sp));
     }
     st = max(max(d - HTALL, sc), openAir(p, u, HTALL));
   }
-  gD = min(d, sp);
+  gD = sp;
   return min(st, sp);
 }
 
@@ -221,9 +232,11 @@ Surf surf(vec3 p, vec3 n, float t) {
   vec3 view = normalize(p - uCamP);
   float j0 = floor(R.x / Te);
   // the riser: the cut edge of the card
-  Surf rs = Surf(mix(uInk[LIT], uInk[SHADE], 0.12), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, fade);
+  // (creases and lips are ruled here in ink, so the line term of z-main is left off: the march comes to rest at
+  // uneven depths along a riser seen end on, and that term would print the unevenness)
+  Surf rs = Surf(mix(uInk[LIT], uInk[SHADE], 0.12), mix(uInk[SHADE], uInk[DEEP], 0.5), 0.0, 0.0);
   // the tread
-  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.42), mix(uInk[SHADE], uInk[LIT], 0.38), 0.0, fade);
+  Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.42), mix(uInk[SHADE], uInk[LIT], 0.38), 0.0, 0.0);
   bool tread = n.y > 0.7;
   bool floor0 = tread && j0 < 0.5 && p.y < 0.5 * uTr[0];
   // a riser belongs to the shelf it holds up: the lowest one whose top is above this point
@@ -240,7 +253,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   float fw = 0.5 * uTr[2] + 6.0, fu = floor0 ? u / fw + 0.5 : 0.0;
   vec4 r = cell4(ivec2(int(jb) + (alongZ ? 0 : 97) + 7 * int(floor(fu)), int(floor(fl))));
   float wet = step(r.x, uTr[8]);
-  if (floor0) { s.lit = uInk[LIT]; s.shade = uInk[SHADE]; s.line = 0.0; }
+  if (floor0) { s.lit = uInk[LIT]; s.shade = uInk[SHADE]; }
   s.lit = mix(s.lit, mix(uInk[LOW], uInk[PAPER], 0.5), wet);
   s.shade = mix(s.shade, mix(uInk[LOW], uInk[SHADE], 0.28), wet);
   // what a level tread prints as when nothing shades it
@@ -252,7 +265,10 @@ Surf surf(vec3 p, vec3 n, float t) {
     float w = max(1.25 * px, 0.05 * uTr[0]);
     float lip = 1.0 - smoothstep(w, w + 0.5 * px, topOf(jt, sh) - p.y);
     lip = max(lip, 1.0 - smoothstep(1.2, 2.6, hr / px));
-    rs.lit = mix(rs.lit, as, lip); rs.shade = mix(rs.shade, as, lip); rs.line *= 1.0 - lip;
+    // and a darker line where it stands on the shelf below
+    float foot = (1.0 - smoothstep(w, w + 0.5 * px, p.y - topOf(jt - 1.0, sh))) * smoothstep(3.5, 6.0, hr / px) * fade;
+    rs.lit = mix(rs.lit, mix(rs.shade, uInk[DEEP], 0.35), 0.6 * foot); rs.shade = mix(rs.shade, uInk[DEEP], 0.5 * foot);
+    rs.lit = mix(rs.lit, as, lip); rs.shade = mix(rs.shade, as, lip);
     return rs;
   }
   // a tread seen so nearly edge on that it is a sliver is printed as the riser behind it: the lip line stays clean
@@ -271,6 +287,6 @@ Surf surf(vec3 p, vec3 n, float t) {
     s.lit = mix(s.lit, mix(uInk[LIT], uInk[PAPER], 0.6), road); s.shade = mix(s.shade, mix(uInk[SHADE], uInk[PAPER], 0.3), road);
   }
   vec3 ar = mix(rs.shade, rs.lit, toneOf(dot(-R.yz / g, uSunDir.xz)));
-  s.lit = mix(s.lit, ar, thin); s.shade = mix(s.shade, ar, thin); s.line *= 1.0 - thin;
+  s.lit = mix(s.lit, ar, thin); s.shade = mix(s.shade, ar, thin);
   return s;
 }

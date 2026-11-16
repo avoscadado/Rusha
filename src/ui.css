@@ -77,6 +77,9 @@ body.bleed #foot { position: fixed; left: 0; right: 0; bottom: 0; padding: 60px 
   color: #fff; background: linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0)); transition: opacity 1.2s ease; pointer-events: none; }
 body.bleed #foot > * { pointer-events: auto; }
 body.bleed.idle #foot { opacity: 0; }
+body.bleed #caption, body.bleed.idle #foot > * { pointer-events: none; }   /* what cannot be seen must not take taps */
+body.bleed #foot:focus-within { opacity: 1; }
+body.bleed #foot:focus-within > nav { pointer-events: auto; }
 body.bleed.idle #view { cursor: none; }
 body.bleed #foot { --ink: #fff; --soft: rgba(255,255,255,.72); --hair: rgba(255,255,255,.3); }
 body.bleed #more { --paper: rgba(16,16,22,.9); }

@@ -77,7 +77,10 @@ Every form's shader is compiled one at a time behind the start screen.
 node build.mjs                                   # writes index.html
 node tools/shot.mjs sheet.jpg "seed={}&form=canal" --t 18 --sheet A1,A2,A3,A4,A5,A6 --cols 3
 node tools/shot.mjs cost.png "seed=A1&form=canal" --t 16 --cost
+node tools/cross.mjs "seed=A1&form=canal"          # steps through a crossing frame by frame, looking for a flash
 node tools/ui.mjs out/ --w 390 --h 844           # the real page: start screen, panels, phone layout
+node tools/fail.mjs                              # no WebGL 2; a lost and restored graphics context
+sh tools/check.sh                                # all of the above, for every form
 node tools/audio-test.mjs                        # renders the score offline and checks it
 ```
 

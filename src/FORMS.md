@@ -33,6 +33,8 @@ and no call to `map()` from a form (z-main calls it from exactly three places).
 
 Rules you must keep yourself:
 
+- `smoothstep(a, b, x)` needs `a < b`. For a falling edge write `1.0 - smoothstep(lo, hi, x)`.
+
 - `map()` is run about a hundred times a pixel. `vnoise()` costs four texel fetches: at most one or two per call.
   Prefer arithmetic: `mod`, `stairs()`, sums of sines, boxes.
 - Never return more than the true distance. If cells differ from their neighbours, step with `cellExit()`

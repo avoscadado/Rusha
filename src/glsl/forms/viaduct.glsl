@@ -13,7 +13,7 @@
 //   uTr[10] layout: 0 one viaduct, 1 an avenue of two, 2 a nave under one deck
 //   uTr[11] the floor     uTr[12] exception: 0 none, 1 a fallen arch, 2 a painted pier, 3 a blind arch
 //   uTr[13] its bay (signed by its side in an avenue)   uTr[14] share of spans that are down (much later)
-//   uTr[15] bits: 1 lamps, 2 lamps already lit, 4 pilasters, 8 openings over the piers
+//   uTr[15] bits: 1 lamps, 2 lamps already lit, 4 pilasters, 8 openings over the piers, 16 the event lights the lamps
 // ---------------------------------------------------------------------------
 #define FAR 5200.0
 #define STEPK 0.9
@@ -66,12 +66,18 @@ float map(vec3 p) {
   vec2 dl = p.xz - uCamP.xz;
   float dc2 = dot(dl, dl) + 1.0, dc = sqrt(dc2);
   float px1 = cdx / (dc2 * uPix);
-  float a0 = S * 0.5 - pw, a = a0 * smoothstep(0.8, 2.0, 2.0 * a0 * px1);
+  float a0 = S * 0.5 - pw;
   float yb = Hm - N * T;
   float v = mod(q.z, S) - S * 0.5;                 // 0 at the middle of a span
   float cv = S * 0.5 - abs(v);                     // distance along the line from the middle of a pier
   float ax = abs(q.x);
   bool pil = vBit(4.0) > 0.5, lamps = vBit(1.0) > 0.5, nave = uTr[10] > 1.5;
+  // which bay this is, and whether its span is down
+  float bay = floor(q.z / S);
+  if (nave) sid = 0.0;                             // under one deck both rows come down together
+  bool odd = uTr[12] > 0.5 && vOdd(bay, uTr[12] < 1.5 ? sid : sgn);
+  bool down = (odd && uTr[12] < 1.5) || (uTr[14] > 0.001 && vDown(bay, sid));
+  float a = down ? a0 : a0 * smoothstep(0.8, 2.0, 2.0 * a0 * px1);   // a gap stays a gap however far off
 
   // the main arcade: one opening to a bay in every tier; the lowest goes down for good
   float ti = clamp(floor((q.y - yb) / T), 0.0, N - 1.0);
@@ -126,10 +132,7 @@ float map(vec3 p) {
     }
   }
   // exceptions. A fallen span only takes stone away, and only inside its own bay.
-  float bay = floor(q.z / S);
-  if (nave) sid = 0.0;                             // under one deck both rows come down together
-  bool odd = uTr[12] > 0.5 && vOdd(bay, uTr[12] < 1.5 ? sid : sgn);
-  if ((odd && uTr[12] < 1.5) || (uTr[14] > 0.001 && vDown(bay, sid))) {
+  if (down) {
     float ya = yb + hs + 0.5 * k * a0, Ha = Hc + 2.4;
     float cut = max(abs(v) - 0.62 * a0, ya - q.y);
     cut = min(cut, max(abs(v) - 0.86 * a0, mix(ya, Ha, 0.42) - q.y));
@@ -140,11 +143,12 @@ float map(vec3 p) {
     float pier = floor(q.z / S + 0.5);
     if (vDown(pier - 1.0, sid) && vDown(pier, sid)) {
       float rr = cell1(ivec2(int(pier), 23 + int(sid)));
-      if (rr < 0.75) d = max(d, (q.y - mix(0.12, 0.8, rr / 0.75) * Hm - 0.22 * (q.z - pier * S)) * 0.97);
+      // what is taken away is this pier's own length of the line above a sloping break, and no more
+      if (rr < 0.75) d = max(d, min((q.y - mix(0.12, 0.8, rr / 0.75) * Hm - 0.22 * (q.z - pier * S)) * 0.97, 0.5 * S - abs(q.z - pier * S)));
     }
   }
-  if (odd && uTr[12] > 2.5)                        // the blind arch: walled up to the crown
-    d = min(d, max(max(ax - 0.55 * w, abs(v) - a0 - 0.1), q.y - yb - T + 0.9));
+  if (odd && uTr[12] > 2.5)                        // the blind arch: walled up flush with the face, so it shows from far along the line
+    d = min(d, max(max(ax - w, abs(v) - a0 - 0.1), q.y - yb - T + 0.9));
   if (uTr[12] > 0.5 && uTr[12] < 1.5 && (uTr[10] < 0.5 || sid * uTr[13] >= 0.0)) {
     // the span lies where it fell: one length of wall, tilted, half under
     vec3 b = vec3(q.x, q.y - max(fy, -2.5) - 0.2 * a0, q.z - (abs(uTr[13]) + 0.5) * S);
@@ -191,6 +195,9 @@ Surf surf(vec3 p, vec3 n, float t) {
   }
   float a0 = S * 0.5 - pw, yb = Hm - N * T, Hc = vTop();
   float v = mod(q.z, S) - S * 0.5, cv = S * 0.5 - abs(v), ax = abs(q.x);
+  // The crease and ridge lines are drawn from how far short of the surface the march stopped, and on
+  // faces seen at a low angle that varies from pixel to pixel: level faces do without them.
+  if (n.y > 0.6) s.line = 0.0;
   vec2 dl = p.xz - uCamP.xz;
   float dc2 = dot(dl, dl) + 1.0, dc = sqrt(dc2);
   float px1 = cdx / (dc2 * uPix);
@@ -207,7 +214,7 @@ Surf surf(vec3 p, vec3 n, float t) {
       globe = length(vec3(ax - wd + 0.4, q.y - Hc - 2.7 - 3.4 * lod, cv)) < max(0.5, 0.85 * uPix * dc) * lod + 0.2 + 0.003 * t;
     }
     if (globe) {
-      float on = max(vBit(2.0), step(cell1(ivec2(int(pier), 40 + int(sgn) + (q.x > 0.0 ? 3 : 0))), uEv.x * 1.02 - 0.01));
+      float on = max(vBit(2.0), vBit(16.0) * step(cell1(ivec2(int(pier), 40 + int(sgn) + (q.x > 0.0 ? 3 : 0))), uEv.x * 1.02 - 0.01));
       s.lit = mix(s.lit, uInk[ACCENT], on); s.shade = mix(s.shade, uInk[ACCENT], on); s.glow = on;
       return s;
     }
@@ -232,9 +239,13 @@ Surf surf(vec3 p, vec3 n, float t) {
   s.shade = mix(s.shade, uInk[DEEP], course * (1.0 - ring) * 0.25);
   if (n.y < -0.3) s.shade = mix(uInk[SHADE], uInk[DEEP], 0.7);                   // the undersides are printed a tone deeper
   if (ax < w - 0.02 && yl > hs && abs(hole) < 0.3 + 0.006 * t) s.lit = s.shade;   // and the inside of an arch takes no light
+  // Between the two rows of the nave, sun that comes along the line would have to thread a dozen
+  // arches to land anywhere: it is left out, and only light from across the line is printed.
+  if (uTr[10] > 1.5 && q.x < w - 0.02 && q.y < Hm)
+    s.lit = mix(s.shade, s.lit, smoothstep(0.6, 0.74, abs(uSunDir.x) / max(length(uSunDir.xz), 1e-3)));
   float bay = floor(q.z / S);
   bool odd = uTr[12] > 0.5 && vOdd(bay, sgn);
-  if (odd && uTr[12] > 2.5 && ax < 0.55 * w + 0.06 && abs(v) < a0 && hole < 0.0) {     // the blind arch is brick, with a door nobody uses
+  if (odd && uTr[12] > 2.5 && ti < 0.5 && hole < -0.04 - 0.003 * t) {             // the blind arch is brick, with a door nobody uses
     float brick = vRule(q.y, 0.7, 0.07, t);
     s.lit = mix(mix(uInk[LIT], uInk[SHADE], 0.35), uInk[SHADE], brick * 0.6);
     s.shade = mix(uInk[SHADE], uInk[DEEP], 0.55);
@@ -242,12 +253,12 @@ Surf surf(vec3 p, vec3 n, float t) {
     if (door < 0.0) { s.lit = uInk[DEEP]; s.shade = uInk[DEEP]; }
   }
   // the painted pier
-  if (uTr[12] > 1.5 && uTr[12] < 2.5 && vOdd(pier, sgn) && cv < pw + 1.0 && q.y < min(yb + hs, 11.0) && q.y > 2.25) {   // as high as a ladder reaches
+  if (uTr[12] > 1.5 && uTr[12] < 2.5 && vOdd(pier, sgn) && cv < pw + 1.0 && q.y < min(yb + hs, 8.0) && q.y > 2.25) {   // as high as a ladder reaches
     s.lit = uInk[ACCENT]; s.shade = mix(uInk[ACCENT], uInk[DEEP], 0.45); s.glow = 0.1;
   }
   // stone is darker where water has stood
   if (fy > -20.0 && fy < -0.05) {
-    float wet = smoothstep(0.12, -0.05, p.y);
+    float wet = 1.0 - smoothstep(-0.05, 0.12, p.y);
     s.lit = mix(s.lit, mix(uInk[SHADE], uInk[LIT], 0.3), wet); s.shade = mix(s.shade, uInk[DEEP], wet * 0.5);
   }
   return s;

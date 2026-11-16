@@ -90,7 +90,7 @@ Surf surf(vec3 p, vec3 n, float t) {
     s.lit = mix(s.lit, uInk[SHADE], joint * 0.3);
   }
   // whatever has been under water stays dark
-  float wet = smoothstep(0.45, 0.12, p.y) * step(base + 0.05, p.y);
+  float wet = (1.0 - smoothstep(0.12, 0.45, p.y)) * step(base + 0.05, p.y);
   s.lit = mix(s.lit, mix(uInk[SHADE], uInk[LIT], 0.3), wet); s.shade = mix(s.shade, uInk[DEEP], wet * 0.6);
   if (p.y < base + 0.05) { s.lit = mix(uInk[SHADE], uInk[LIT], 0.4); s.line = 0.0; }
   return s;

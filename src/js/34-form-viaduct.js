@@ -3,11 +3,12 @@
 FORMS.viaduct = {
   weight: 0,
   build(g, S) {
-    const r = S('viaduct'), rv = S('viaduct.view'), rl = S('viaduct.light'), re = S('viaduct.event');
+    // each group of traits has its own stream, so one can grow without disturbing the others
+    const r = S('viaduct'), rd = S('viaduct.detail'), ro = S('viaduct.odd'), rv = S('viaduct.view'), rl = S('viaduct.light'), re = S('viaduct.event');
     const hour = g.pal.hour;
     // ---- the structure ----
     const lay = r.weighted([[0, 6], [1, 1.5], [2, 1.7]]);         // one viaduct, an avenue of two, a nave under one deck
-    const under = r.weighted([['mist', 4.5], ['mirror', 2], ['water', 1.3], ['dry', 2.8]]);
+    const under = S('viaduct.under').weighted([['mist', 4.5], ['mirror', 2], ['water', 1.3], ['dry', 2.8]]);
     const bay = Math.round(r.range(20, 40));
     const gap = r.range(13, 20);                                 // nave only: half the clear width between the two rows
     let Hall = r.range(30, 90);
@@ -31,22 +32,22 @@ FORMS.viaduct = {
     const T = N === 1 ? Math.min(Hm, rise + band + 1) : Math.min(Hm / N, tMin * r.range(1, 1.5));
     const hs = T - band - rise;
     const w = r.range(1.9, 2.9) + Hall / 60;
-    const pil = r.chance(0.55), open = !pil && r.chance(0.55);
+    const pil = rd.chance(0.55), open = !pil && rd.chance(0.55);
     const eFoot = pil ? 0.35 + 0.5 * w : 0;                      // how far a pier stands out from the wall at the datum
     const reach = w + eFoot + 0.9 + 0.3;                         // nothing of the viaduct is farther from its centre plane, low down
-    let lamps = r.chance(0.45);
+    let lamps = rd.chance(0.45);
 
     // ---- the flight ----
     g.speed = rv.range(10, 15); g.lead = 70;
     const side = lay === 0 ? (rv.chance(0.5) ? 1 : -1) : 1;      // which side the viaduct stands on
-    const exSide = rv.chance(0.5) ? 1 : -1;
+    const exSide = ro.chance(0.5) ? 1 : -1;
     const view = lay === 2 ? 'nave' : rv.weighted([['low', 3], ['mid', 2], ['deck', lay === 0 ? 2.6 : 0], ['climb', 2.2]]);
     let X0, doorR = 5;
     const P = g.path;
     if (lay === 0) {
       X0 = view === 'deck' ? rv.range(20, 30) : clamp(Hall * rv.range(0.55, 1.0), 30, 78);
       const room = X0 - reach - doorR - 7;                       // sideways room for the line to wander in
-      P.ax = Math.min(room, X0 * rv.range(0.25, 0.5), view === 'deck' ? 5 : 40);
+      P.ax = Math.max(0, Math.min(room, X0 * rv.range(0.25, 0.5), view === 'deck' ? 5 : 40));
       P.fx = TAU / rv.range(1300, 2100);
       P.px = -side * (Math.PI / 2 + rv.range(-0.25, 0.35));      // far out at first, then closing on the arches
     } else if (lay === 1) {
@@ -76,26 +77,26 @@ FORMS.viaduct = {
     // ---- what lies under it, and what happens ----
     let floor = 0, riseTo = 0;
     g.floodTo = 1.2;
-    const f = g.facts = { H: Hall, span: Math.round(2 * a), bay, N, nUp, tiers: N + (nUp ? 1 : 0), lay, under, view, pointed: k > 1 };
+    const f = g.facts = { H: Hall, span: Math.round(2 * a), bay, N, nUp, tiers: N + (nUp ? 1 : 0), lay, under, view, pointed: k > 1, dusk: hour === 1 };
     const pick = (opts) => re.weighted(opts.concat([['sunset', hour === 1 ? 3 : 0]]));
     let ev;
     if (under === 'mist') {
       g.sea = [3, 0, 0, 0]; floor = -90;
-      ev = pick([['none', 3], ['mistup', 1.6], ['mistdown', 1.6], ['fog', 1.5], ['lights', 2.4]]);
+      ev = pick([['none', 5], ['mistup', 1.6], ['mistdown', 1.6], ['fog', 1.5], ['lights', 2.4]]);
       if (ev === 'mistup') {
         riseTo = Math.min(ymin - 4.5, re.range(5, 12));
         if (riseTo < 2) { ev = 'none'; riseTo = 0; } else { g.ev = { id: 1, type: 'tide', t0: 9, dur: 32, amount: riseTo }; f.mist = 'up'; }
       } else if (ev === 'mistdown') { g.ev = { id: 1, type: 'tide', t0: 9, dur: 34, amount: -re.range(9, 22) }; f.mist = 'down'; }
     } else if (under === 'dry') {
-      ev = pick([['none', 2], ['mistin', 3.4], ['fog', 1.4], ['lights', 2]]);
+      ev = pick([['none', 3.5], ['mistin', hour === 1 ? 6 : 2.6], ['fog', 1.4], ['lights', 2]]);
       if (ev === 'mistin') {                                     // a sea of mist comes up through the ground and gives it a river
         riseTo = Math.min(ymin - 4.5, re.range(2.5, 6));
         if (riseTo < 1.5) { ev = 'none'; riseTo = 0; } else { g.sea = [3, -1.2, 0, 0]; g.ev = { id: 1, type: 'tide', t0: 12, dur: 26, amount: riseTo + 1.2 }; f.mist = 'in'; }
       }
     } else {
       g.sea = [under === 'mirror' ? 2 : 1, 0, under === 'mirror' ? re.range(0.3, 0.75) : re.range(0.6, 1), 0];
-      floor = -0.3;
-      ev = pick([['none', 2.2], ['down', 2.4], ['up', 1.2], ['fog', 1.2], ['lights', 2]]);
+      floor = -1.6;
+      ev = pick([['none', 4], ['down', 2.4], ['up', 1.2], ['fog', 1.2], ['lights', 2]]);
       if (ev === 'down') { const to = -re.range(2.5, 5); floor = to - 0.4; g.ev = { id: 1, type: 'tide', t0: 10, dur: 30, amount: to }; f.tide = 'down'; }
       else if (ev === 'up') {
         riseTo = Math.min(ymin - 4.5, re.range(1.5, 3));
@@ -109,9 +110,10 @@ FORMS.viaduct = {
     f.lamps = lamps; f.ev = g.ev.type;
 
     // ---- the one exception, where the flight will pass it ----
+    // one loud thing: where something happens, the exception is rarer
     const loud = g.ev.type === 'lights' || f.mist === 'in';
-    const ex = r.weighted([[0, loud ? 6 : 2.2], [1, 3.2], [2, 2], [3, 1.8]]);
-    const oz = Math.max(2, Math.round((g.speed * r.range(17, 22)) / bay));
+    const ex = ro.weighted([[0, loud ? 16 : g.ev.type === 'none' ? 1.6 : 14], [1, 3.2], [2, 2], [3, 1.8]]);
+    const oz = Math.max(2, Math.round((g.speed * ro.range(17, 22)) / bay));
     f.ex = ex;
 
     // ---- portals: both hang in clear air on the open side, above whatever the datum does ----
@@ -119,12 +121,14 @@ FORMS.viaduct = {
     const stranger = lay === 2 ? [0, kinY + 2 * doorR + 0.8]
       : lay === 1 ? [exSide * 3, kinY + 2 * doorR + 0.6]
       : [-side * (2 * doorR + rv.range(1, 3)), kinY + doorR * rv.range(0.7, 1.3)];
-    g.door = { r: doorR, kin: [0, kinY], stranger };
+    // they open over the middle of a span, clear of the ribs of the nave
+    g.door = { r: doorR, kin: [0, kinY], stranger, snap: [bay, 0] };
 
     // ---- light: the sun either rakes the face from the open side or comes through the arches ----
     const through = lay === 2 ? true : rl.chance(under === 'dry' ? 0.75 : 0.5);
     const sunSide = lay === 0 ? (through ? side : -side) : (rl.chance(0.5) ? 1 : -1);
-    const az = hour === 1 ? rl.range(0.3, 0.72) : hour === 2 ? rl.range(0.5, 1.1) : rl.range(0.32, 0.9);
+    // under the deck the light must come well across the line, or it never reaches the far row
+    const az = lay === 2 ? rl.range(0.85, 1.3) : hour === 1 ? rl.range(0.3, 0.72) : hour === 2 ? rl.range(0.5, 1.1) : rl.range(0.32, 0.9);
     g.sunAz = sunSide * az;
     if (hour === 1) g.sunEl = rl.range(0.075, 0.17);
     if (hour === 2) g.sunEl = rl.range(0.36, 0.72);
@@ -134,10 +138,10 @@ FORMS.viaduct = {
     g.fill = through ? [-sunSide, 0.3, -0.15, 1] : [0.1 * sunSide, 0.25, -1, 0.8];
     f.through = through;
     g.air = [lay === 2 ? rl.range(0.0022, 0.003) : rl.range(0.0013, 0.0021), rl.int(5, 8), -100, 0];
-    if (lay === 2) g.sky[3] = 0;
+    if (lay !== 0) g.sky[3] = 0;                                 // no far country in the notch between two rows
 
     g.tr.set([bay, Hm, T, N + 10 * nUp, pw, w, k, hs, hT, lay === 0 ? side * X0 : X0, lay, floor,
-      ex, ex ? oz * (lay === 1 ? exSide : 1) : 0, 0, (lamps ? 1 : 0) + (pil ? 4 : 0) + (open ? 8 : 0)]);
+      ex, ex ? oz * (lay === 0 ? 1 : exSide) : 0, 0, (lamps ? 1 : 0) + (lamps && hour === 0 && g.ev.type !== 'lights' ? 2 : 0) + (pil ? 4 : 0) + (open ? 8 : 0) + (g.ev.type === 'lights' ? 16 : 0)]);
     g.pulse = bay;
     g.timbres = ['bowed', 'bell', 'organ'];
     g.space = lay === 2 ? 0.9 : 0.75;
@@ -154,7 +158,9 @@ FORMS.viaduct = {
     else if (f.tiers === 2) first = `Two tiers of arches ${span} metres wide carry a deck ${H} metres up.`;
     else if (f.view === 'deck') first = `The deck is ${H} metres up and has a pier under it every ${bay} metres.`;
     else first = `Piers ${H} metres high carry arches ${span} metres wide from one horizon to the other.`;
-    const nothing = ['It crosses nothing.', f.under === 'mist' ? 'The mist stands where a river would.' : f.under === 'dry' ? 'The ground under it is level and dry.' : 'The water under it is standing water.'];
+    const two = f.lay === 1;
+    const nothing = [two ? 'They cross nothing.' : 'It crosses nothing.',
+      f.under === 'mist' ? 'The mist stands where a river would.' : f.under === 'dry' ? `The ground under ${two ? 'them' : 'it'} is level and dry.` : `The water under ${two ? 'them' : 'it'} does not go anywhere.`];
     const odd = { 1: ['One span is down.', 'The others have not moved.'], 2: ['One pier has been painted as high as a ladder reaches.', 'Nobody has painted the next.'], 3: ['One arch has been walled up, with a door in the wall.'] }[f.ex];
     const then = f.mist === 'in' ? 'The mist comes in while you are here and gives it a river.'
       : f.mist === 'up' ? 'The mist is rising up the piers.'
@@ -166,8 +172,9 @@ FORMS.viaduct = {
       : f.ev === 'sunset' ? 'The sun goes while you are here.' : '';
     const mid = odd || nothing;
     const bits = then ? [first, mid[0], then] : [first, mid[0], mid[1] || nothing[0]];
-    const name = f.ex === 1 ? 'The Fallen Arch' : f.ex === 2 ? 'The Painted Pier' : f.ex === 3 ? 'The Blind Arch'
-      : f.mist === 'in' ? 'The Viaduct at Dusk'
+    const name = f.ex === 1 ? (f.lay === 2 ? 'The Gap in the Deck' : f.lay === 1 ? 'One Span Down' : 'The Fallen Arch')
+      : f.ex === 2 ? 'The Painted Pier' : f.ex === 3 ? (f.lay === 2 ? 'The Walled Arch' : 'The Blind Arch')
+      : f.mist === 'in' ? (f.dusk ? 'The Viaduct at Dusk' : 'Mist under the Viaduct')
       : f.mist === 'down' ? 'Mist Going Out'
       : f.tide === 'down' ? 'Low Water at the Viaduct'
       : f.ev === 'lights' ? (f.lay === 2 ? 'Lamps under the Deck' : 'Lamps on the Parapet')
@@ -187,17 +194,17 @@ FORMS.viaduct = {
     drained: 'The same viaduct with the water gone. Every pier has a dark foot.',
     mist: 'The same viaduct. Mist has come in under the arches and given it a river.',
     night: 'The same viaduct after dark. It still crosses nothing.',
-    snow: 'The same viaduct under snow. There is a white line along the parapet.',
+    snow: 'The same viaduct under snow. Every ledge has a white line along it.',
   },
   // much later: spans are down all along the line, and nothing is lit
   later(g, r) {
     g.tr[14] = r.range(0.3, 0.46);
     if (g.tr[12] === 1) g.tr[12] = 0;
-    g.tr[15] -= (g.tr[15] % 4 >= 2 ? 2 : 0) + (g.tr[15] % 2);
+    g.tr[15] = g.tr[15] & 12;                                    // keep the pilasters and the openings, lose the lamps
     if (g.ev.type === 'lights') g.ev.type = 'none';
   },
   // after dark the parapet lamps, where there are any, are already on
   night(g) {
-    if (g.tr[15] % 2 >= 1 && g.tr[14] === 0 && g.tr[15] % 4 < 2) { g.tr[15] += 2; if (g.ev.type === 'lights') g.ev.type = 'none'; }
+    if (g.tr[15] & 1) { g.tr[15] = (g.tr[15] & 13) | 2; if (g.ev.type === 'lights') g.ev.type = 'none'; }
   },
 };

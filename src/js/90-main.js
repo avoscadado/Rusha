@@ -5,9 +5,14 @@ const qn = (k, d) => (Q.has(k) && Number.isFinite(+Q.get(k)) ? +Q.get(k) : d);
 // First plates for a new visitor: seeds chosen by eye from contact sheets.
 const PILOTS = [];
 
+function hashKey() {
+  if (location.hash.length < 2) return null;
+  try { return WORLD.parse(decodeURIComponent(location.hash.slice(1))); } catch (e) { return null; }   // a mangled link is no link
+}
+
 function startKey() {
-  const fromHash = WORLD.parse(decodeURIComponent(location.hash.slice(1)));
-  if (location.hash.length > 1 && fromHash) return fromHash;
+  const fromHash = hashKey();
+  if (fromHash) return fromHash;
   if (Q.has('seed')) { const k = WORLD.parse(Q.get('seed')); if (k) return k; }
   const fresh = (Math.random() * 4294967296) >>> 0;
   if (PILOTS.length && !UI.store.plates.length) { const k = WORLD.parse(PILOTS[fresh % PILOTS.length]); if (k) return k; }
@@ -34,6 +39,7 @@ function boot() {
   if (GLX.caps.software && !shot) { ENG.budget = 0.07e6; ENG.budgetMax = 0.16e6; ENG.budgetMin = 0.04e6; ENG.quality = { steps: 72, reflect: 28, shadow: 18 }; }
   else if (matchMedia('(pointer: coarse)').matches) { ENG.budget = 0.3e6; ENG.budgetMax = 1.8e6; }   // phones and tablets start lower
   if (Q.has('mp')) ENG.budget = qn('mp', 0.3) * 1e6;
+  ENG.fullQuality = { ...ENG.quality };
 
   const key = startKey();
   if (Q.has('change')) key.change = qn('change', 0) >>> 0;
@@ -44,7 +50,9 @@ function boot() {
   ENG.goTo(key);
 
   const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  UI.setGentle(UI.store.gentle === null ? reduce : UI.store.gentle);
+  // a stored choice wins; otherwise follow the system's reduced-motion setting without storing it
+  if (UI.store.gentle === null) { ENG.gentle = !!reduce; $('b-gentle').setAttribute('aria-pressed', String(!!reduce)); }
+  else UI.setGentle(UI.store.gentle);
   if (UI.store.bleed || (!shot && Math.min(innerWidth, innerHeight) < 430)) UI.setBleed(true);
   if (shot && !shotUi) document.body.classList.add('bleed');
 
@@ -60,11 +68,18 @@ function boot() {
   ENG.on.pulse = () => { if (hasAudio && AUDIO.ready) AUDIO.pulse(0.5); };
   ENG.on.event = (phase) => { if (hasAudio && AUDIO.ready) AUDIO.event(phase); };
   ENG.on.lost = () => { const v = $('veil'); v.className = ''; $('veil-go').hidden = true; $('veil-note').hidden = true; veilSub.textContent = 'one moment'; };
-  ENG.on.restored = () => { $('veil').classList.add('open', 'gone'); };
+  ENG.on.restored = () => { if (UI.begun) $('veil').classList.add('open', 'gone'); else { offered = false; } };
   ENG.on.fail = (msg) => { const v = $('veil'); v.className = ''; $('veil-go').hidden = true; $('veil-note').hidden = true; veilSub.textContent = msg; };
 
   UI.wire();
   let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => ENG.resize(), 120); });
+  // the caption changes height from plate to plate, and the picture above it must follow
+  if (window.ResizeObserver && !shot) new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => ENG.resize(), 60); }).observe(canvas);
+  // a link to another place, pasted into this tab
+  window.addEventListener('hashchange', () => {
+    const k = hashKey();
+    if (k && ENG.cur && WORLD.code(k) !== WORLD.code(ENG.cur.key)) ENG.goTo(k, { kind: 'first', step: ENG.journey.step + 1 });
+  });
 
   if (shot) {
     // window.__ks: advance(seconds) simulates with a fixed step and draws one frame
@@ -86,7 +101,7 @@ function boot() {
       info() {
         const w = ENG.cur; if (!w) return null;
         return { form: w.g.form, pal: w.g.pal.name, ta: +w.ta.toFixed(2), z: Math.round(w.z), doors: !!ENG.doors, step: ENG.journey.step, code: WORLD.code(w.key), name: w.g.name, line: w.g.line,
-          set: w.g.set.type, ev: w.g.ev.type, change: w.g.changeType,
+          set: w.g.set.type, ev: w.g.ev.type, change: w.g.changeType, left: ENG.doors ? (ENG.doors.z - w.z) / w.g.speed : undefined,
           cands: ENG.cand.map((c) => c && { form: c.g.form, pal: c.g.pal.name, name: c.g.name, state: c.prog.state }), rw: ENG.rw, rh: ENG.rh, compile: Math.round(w.prog.compileMs) };
       },
       // mean and max of the red channel: with ?debug=1 that is march cost * 255 / 200
@@ -105,8 +120,8 @@ function boot() {
 
   let last = performance.now();
   const loop = (now) => {
-    const dt = Math.min(0.1, Math.max(0, (now - last) / 1000)); last = now;
-    try { ENG.step(dt); ENG.render(); ENG.govern(dt); UI.frame(dt); }
+    const raw = Math.max(0, (now - last) / 1000), dt = Math.min(0.1, raw); last = now;
+    try { ENG.step(dt); const drew = ENG.render(); ENG.govern(raw, drew); UI.frame(dt); }
     catch (e) { if (ENG.errors.length < 20) { ENG.errors.push(String(e && e.stack || e)); console.error(e); } }
     requestAnimationFrame(loop);
   };

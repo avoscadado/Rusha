@@ -96,7 +96,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   float course = smoothstep(0.44, 0.48, abs(fract(p.y / 0.9) - 0.5)) * step(abs(n.y), 0.5) * exp(-t * 0.03);
   s.lit = mix(s.lit, mix(uInk[LIT], uInk[SHADE], 0.45), course * 0.6);
   // the tide mark: stone is darker where the water has been
-  float wet = uSea.x > 0.5 ? smoothstep(uSea.y + 0.9, uSea.y + 0.5, p.y) : 0.0;
+  float wet = uSea.x > 0.5 ? (1.0 - smoothstep(uSea.y + 0.5, uSea.y + 0.9, p.y)) : 0.0;
   s.lit = mix(s.lit, mix(uInk[SHADE], uInk[LIT], 0.35), wet); s.shade = mix(s.shade, uInk[DEEP], wet * 0.5);
   float cz = floor(p.z / S + 0.5);
   bool odd = uTr[9] > 0.5 && uTr[9] < 1.5 && abs(cz - uTr[8]) < 0.5 && abs(p.x) < S && sign(p.x) * uTr[10] > 0.0;

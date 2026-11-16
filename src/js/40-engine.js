@@ -14,7 +14,7 @@ const ENG = {
   cand: [null, null],      // kin, stranger: the worlds behind the portals
   doors: null,             // { z, born, chosen, auto } once the portals are open
   look: { yaw: 0, pitch: 0, tyaw: 0, tpitch: 0, idle: 9 },
-  camOff: [0, 0], roll: 0, carry: [0, 0],
+  camOff: [0, 0], roll: 0, carry: [0, 0], focalFrom: 0,
   fade: 0, fadeInk: [0, 0, 0],
   clock: 0, frame: 0, paused: false, gentle: false, started: false, linger: false, hurry: false,
   journey: { seed: 1, step: 0, kinRun: 0, plates: [] },
@@ -38,17 +38,24 @@ const ENG = {
       blur: GLX.program(head + GLSL['post/blur'], 'blur'),
       fin: GLX.program(head + GLSL['post/final'], 'final'),
     };
-    canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); GLX.lost = true; if (this.on.lost) this.on.lost(); });
-    canvas.addEventListener('webglcontextrestored', () => { GLX.lost = false; this.rebuild(); });
+    if (!this.bound) {                                    // once only: rebuild() comes back through here
+      this.bound = true;
+      canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); GLX.lost = true; if (this.on.lost) this.on.lost(); });
+      canvas.addEventListener('webglcontextrestored', () => { GLX.lost = false; this.rebuild(); });
+    }
     return true;
   },
 
   // after a lost context every GL object is gone; worlds are rebuilt from their keys
   rebuild() {
-    const keep = { cur: this.cur && this.cur.key, t: this.cur && this.cur.t, z: this.cur && this.cur.z };
-    this.progs.clear(); this.tg = null; this.warmed = false;
+    const old = this.cur;
+    // nothing a lost context did to a shader says anything about the shader
+    this.progs.clear(); this.badForms.clear(); this.tg = null; this.warmed = false;
     this.init(this.canvas); this.resize(true);
-    if (keep.cur) { this.goTo(keep.cur, { quiet: true }); }
+    if (old) {
+      const w = this.goTo(old.key, { quiet: true, kind: 'again' });
+      w.t = old.t; w.ta = old.ta; w.z = old.z;               // the visit carries on from where it was
+    }
     if (this.on.restored) this.on.restored();
   },
 
@@ -73,7 +80,7 @@ const ENG = {
       if (this.badForms.has(name) || (FORMS[name].weight ?? 1) <= 0) continue;   // unfinished forms are never picked
       const had = this.progs.has(name), p = this.programFor(name);
       if (!had) return;                                    // just started: come back when it is done
-      if (p.state === 'failed') { this.badForms.add(name); this.errors.push('form ' + name + ': ' + (p.error || 'failed')); continue; }
+      if (p.state === 'failed') { this.badForms.add(name); if (this.errors.length < 20) this.errors.push('form ' + name + ': ' + (p.error || 'failed')); continue; }
       if (p.state === 'ready' && !p.drawn) {
         // one pixel through the real pipeline, so the driver finishes its own late work now
         const rec = this.makeRecord({ base: 0x1234567, change: 0, heir: 1, age: 0, form: name });
@@ -124,7 +131,7 @@ const ENG = {
     this.cur = this.makeRecord(key);
     this.cur.z = 0; this.cur.ta = 0;
     this.cand = [null, null]; this.doors = null;
-    this.camOff = [0, 0]; this.carry = [0, 0]; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
+    this.camOff = [0, 0]; this.carry = [0, 0]; this.focalFrom = 0; this.look.yaw = this.look.pitch = this.look.tyaw = this.look.tpitch = 0;
     this.fade = 0; this.arrived = false; this.hurry = false;
     this.arrivalKind = opts.kind || 'first';
     if (!opts.quiet) { this.journey.step = opts.step || 0; }
@@ -160,16 +167,17 @@ const ENG = {
     for (const p of this.progs.values()) {
       if (p.state === 'compiling') {
         GLX.ready(p);
-        if (p.state === 'compiling' && performance.now() - p.started > 25000) { p.state = 'failed'; p.error = 'compile timed out'; }
+        if (GLX.lost) p.started = performance.now();          // the clock does not run while the context is gone
+        else if (p.state === 'compiling' && performance.now() - p.started > 25000) { p.state = 'failed'; p.error = 'compile timed out'; }
       }
     }
     if (st === 'failed') { this.failWorld(w); return; }
     if (st !== 'ready') return;
     this.warm();
     if (!this.arrived) { this.arrived = true; if (this.on.arrive) this.on.arrive(w, this.arrivalKind || 'first'); }
+    this.fade = Math.min(1, this.fade + dt / 2.2);         // a plate fades in even while paused
     if (this.paused) dt = 0;
     this.clock += dt; this.frame++;
-    this.fade = Math.min(1, this.fade + dt / 2.2);
     const g = w.g;
     w.t += dt; w.ta += dt;
     if (!this.started) w.ta = Math.min(w.ta, 0.5);          // behind the veil the visit has not begun
@@ -205,7 +213,8 @@ const ENG = {
     L.yaw = damp(L.yaw, L.tyaw, 5, dt); L.pitch = damp(L.pitch, L.tpitch, 5, dt);
 
     if (this.doors) this.stepDoors(dt);
-    if (w.z > 60000 && !this.doors && this.cand[0] && this.cand.every((c) => c.prog.state === 'ready')) this.openDoors();
+    // nobody can stay for ever: far from the origin the numbers that draw the place lose their fineness
+    if (w.z > 9000) this.linger = false;
   },
 
   openDoors() {
@@ -220,6 +229,9 @@ const ENG = {
     }
     const p = WORLD.pathAt(g, z);
     const mk = (o) => ({ c: [p[0] + o[0], p[1] + o[1], z], r: g.door.r });
+    // whatever offset was still easing away after the last crossing is taken as it stands
+    const eased = Math.exp(-Math.max(0, w.ta) * 0.9);
+    this.camOff = [this.camOff[0] * eased, this.camOff[1] * eased];
     // hands-off, the flight looks once more at each place, changed, and then moves on
     const auto = this.journey.kinRun >= 1 ? 1 : 0;
     this.doors = { z, born: w.ta, auto, chosen: auto, picked: false, d: [mk(g.door.kin), mk(g.door.stranger)], open: 0, gaze: [0, 0] };
@@ -239,7 +251,8 @@ const ENG = {
       const facing = V.dot(to, cam.fwdUser);
       D.gaze[k] = damp(D.gaze[k], smooth(0.955, 0.995, facing), 3, dt);
     }
-    if (this.look.idle < 2.2 && left > g.speed * 2.5) {
+    // only once the doors are open enough to tell apart, and only when one is plainly meant
+    if (this.look.idle < 2.2 && left > g.speed * 2.5 && D.open > 0.6 && Math.abs(D.gaze[0] - D.gaze[1]) > 0.2) {
       const pick = D.gaze[0] > 0.6 && D.gaze[0] > D.gaze[1] ? 0 : D.gaze[1] > 0.6 ? 1 : -1;
       if (pick >= 0) this.choose(pick);
     }
@@ -248,7 +261,7 @@ const ENG = {
     const pull = 1 - smooth(g.speed * 2.5, g.speed * (g.door.from || 10), left);
     this.camOff[0] = damp(this.camOff[0], o[0] * pull, 2.5, dt);
     this.camOff[1] = damp(this.camOff[1], o[1] * pull, 2.5, dt);
-    if (left <= 0) this.cross();
+    if (left <= g.speed * 0.004) this.cross();             // a hair early: on the plane itself the door has no depth
   },
 
   cross() {
@@ -264,8 +277,10 @@ const ENG = {
     this.journey.kinRun = k === 0 ? this.journey.kinRun + 1 : 0;
     this.cur = next; this.cand = [null, null]; this.doors = null; this.hurry = false;
     void E;
-    this.carry = [0, 0];
-    const fB = this.camera(next).fwd, fA = camA.fwd;
+    this.carry = [0, 0]; this.focalFrom = 0;
+    const camB = this.camera(next);
+    this.focalFrom = camA.focal / (camB.focal / next.g.focal);   // the lens the door was seen through
+    const fB = camB.fwd, fA = camA.fwd;
     let dy = Math.atan2(fA[0], fA[2]) - Math.atan2(fB[0], fB[2]);
     if (dy > Math.PI) dy -= TAU; else if (dy < -Math.PI) dy += TAU;
     this.carry = [dy, Math.asin(clamp(fA[1], -1, 1)) - Math.asin(clamp(fB[1], -1, 1))];
@@ -279,8 +294,9 @@ const ENG = {
 
   failWorld(w) {
     this.badForms.add(w.g.form);
-    this.errors.push('world ' + w.g.form + ': ' + (w.prog.error || 'failed'));
-    if (this.badForms.size >= WORLD.formNames().length) { if (this.on.fail) this.on.fail('No world could be drawn on this device.'); this.cur = null; return; }
+    if (this.errors.length < 20) this.errors.push('world ' + w.g.form + ': ' + (w.prog.error || 'failed'));
+    const usable = WORLD.formNames().filter((n) => (FORMS[n].weight ?? 1) > 0);
+    if (usable.every((n) => this.badForms.has(n))) { if (this.on.fail) this.on.fail('This device could not draw any of the places.'); this.cur = null; return; }
     let key = { ...w.key }, tries = 0, rec;
     do { key.base = mix32(key.base + 1013); key.change = 0; rec = this.makeRecord(key); } while (this.badForms.has(rec.g.form) && tries++ < 40);
     this.cur = rec; this.cand = [null, null]; this.doors = null; this.arrived = false;
@@ -308,8 +324,9 @@ const ENG = {
     if (this.doors) {
       const D = this.doors, c = D.d[D.chosen].c, left = D.z - z;
       const a = 0.75 * smooth(g.speed * 13, g.speed * 5, left) * D.open;
-      const dir = V.norm(V.sub(c, pos)), base = V.norm(V.sub(tgt, pos));
-      tgt = V.add(pos, V.norm(V.mix(base, [dir[0], dir[1], Math.max(dir[2], 0.2)], a)));
+      // aim through the door at a point well beyond it: aiming at its centre has no meaning at the threshold
+      const dir = V.norm(V.sub([c[0], c[1], c[2] + 30], pos)), base = V.norm(V.sub(tgt, pos));
+      tgt = V.add(pos, V.norm(V.mix(base, dir, a)));
     }
     let f = V.norm(V.sub(tgt, pos));
     // the heading carried through the last portal eases into this world's own line
@@ -328,7 +345,8 @@ const ENG = {
     const cr = Math.cos(roll), sr = Math.sin(roll);
     const r2 = V.add(V.mul(r, cr), V.mul(u, sr)), u2 = V.sub(V.mul(u, cr), V.mul(r, sr));
     const aspect = this.rw / this.rh;
-    const focal = g.focal * (aspect < 1.2 ? Math.pow(aspect / 1.2, 0.55) : 1);
+    const lens = this.focalFrom ? mix(g.focal, this.focalFrom, settle) : g.focal;   // eases from the last world's lens
+    const focal = lens * (aspect < 1.2 ? Math.pow(aspect / 1.2, 0.55) : 1);
     return { pos, fwd: fwdBase, fwdUser: f, right: r2, up: u2, focal, aspect };
   },
 
@@ -439,27 +457,51 @@ const ENG = {
     return true;
   },
 
-  // ---- the governor: holds the frame rate by changing how many pixels are marched ----
-  gov: { acc: 0, n: 0, hold: 0, wait: 2, lastUp: 0, floor: 1 / 60, seen: [] },
-  govern(dt) {
+  // ---- the governor ----
+  // Holds the frame rate by changing how many pixels are marched. It aims at the
+  // display's own rate, sixty a second unless it learns otherwise, and takes care
+  // not to mistake its own slowness for the display's.
+  gov: { acc: 0, n: 0, hold: 0, wait: 2, period: 1 / 60, idle: [], drop: null, calm: 0 },
+  govern(dt, drew) {
     const G = this.gov;
-    if (this.fixed || this.paused || this.compiling() || dt > 0.5) { G.acc = 0; G.n = 0; return; }
+    if (this.fixed) return;
+    if (!drew) {
+      // frames in which nothing was drawn (shaders still compiling) show the display's true interval
+      if (dt > 0.003 && dt < 0.05) {
+        G.idle.push(dt);
+        if (G.idle.length >= 12) { G.period = clamp(G.idle.slice().sort((x, y) => x - y)[6], 1 / 144, 1 / 30); G.idle.length = 0; }
+      }
+      G.acc = 0; G.n = 0; return;
+    }
+    if (this.paused || this.compiling() || dt > 0.5) { G.acc = 0; G.n = 0; return; }
     G.acc += dt; G.n++;
     if (G.acc < 0.8) return;
     const avg = G.acc / G.n; G.acc = 0; G.n = 0;
-    // learn the display's own frame time from the fastest window seen
-    G.seen.push(avg); if (G.seen.length > 40) G.seen.shift();
-    G.floor = Math.max(1 / 144, Math.min(...G.seen, 1 / 30));
     this.stats.fps = 1 / avg;
-    const target = Math.max(G.floor * 1.12, 1 / 58);
+    const target = Math.max(G.period * 1.12, 1 / 58);
+    if (G.drop) {
+      // a cut in pixels that bought no time means something else sets this pace (a display
+      // held at thirty, say): take the pixels back and stop chasing it
+      const d = G.drop; G.drop = null;
+      if (avg > d.avg * 0.93 && avg < 0.06) {
+        this.budget = d.budget; G.period = clamp(avg, G.period, 1 / 24); G.hold = 0; this.resize(); return;
+      }
+    }
     if (avg > target * 1.18) {
       // at the floor already: give up reflections of the scene and some shadow detail before anything else
       if (this.budget <= this.budgetMin * 1.01 && !this.lite) { this.lite = true; this.quality = { steps: Math.min(this.quality.steps, 80), reflect: 0, shadow: 14 }; }
+      const before = this.budget;
       this.budget = Math.max(this.budgetMin, this.budget * (avg > target * 1.8 ? 0.6 : 0.82));
-      G.hold = 0; G.wait = Math.min(G.wait * 1.6, 40);
+      if (this.budget < before * 0.9) G.drop = { avg, budget: before };
+      G.hold = 0; G.calm = 0; G.wait = Math.min(G.wait * 1.6, 40);
       this.resize();
     } else if (avg < target * 1.04) {
-      G.hold += 0.8;
+      G.hold += 0.8; G.calm += 0.8;
+      if (G.calm > 30) {                                     // a long quiet spell: be quicker to try for more again
+        G.calm = 0; G.wait = Math.max(2, G.wait * 0.7);
+        if (this.lite && this.budget > this.budgetMin * 3) { this.lite = false; this.quality = { ...this.fullQuality }; }
+        if (G.period > 1 / 58) G.period = Math.max(1 / 60, G.period * 0.9);   // and test now and then whether the display has sped up
+      }
       if (G.hold >= G.wait && this.budget < this.budgetMax && this.rw < this.cw * 1.4) {
         this.budget = Math.min(this.budgetMax, this.budget * 1.15); G.hold = 0; this.resize();
       }

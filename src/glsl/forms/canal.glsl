@@ -68,7 +68,7 @@ Surf surf(vec3 p, vec3 n, float t) {
   float Wc = uTr[0], B = uTr[1], Q = uTr[4], st = uTr[8];
   float ax = abs(p.x), side = p.x < 0.0 ? -1.0 : 1.0;
   Surf s = Surf(mix(uInk[LIT], uInk[PAPER], 0.3), mix(uInk[SHADE], uInk[DEEP], 0.3), 0.0, 1.0);
-  float wet = uSea.x > 0.5 ? smoothstep(uSea.y + 0.7, uSea.y + 0.35, p.y) : 0.0;
+  float wet = uSea.x > 0.5 ? (1.0 - smoothstep(uSea.y + 0.35, uSea.y + 0.7, p.y)) : 0.0;
   if (p.y < -2.9) { s.lit = mix(uInk[LIT], uInk[SHADE], 0.45); s.shade = uInk[SHADE]; s.line = 0.0; return s; }
   if (uTr[5] > 1.0 && bridgeD(p) < 0.03 + 0.002 * t) {       // a bridge: pale stone
     s.lit = mix(uInk[LIT], uInk[PAPER], 0.6);

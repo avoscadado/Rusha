@@ -95,7 +95,8 @@ const UI = {
   jump(i) {
     const p = this.plates[i]; if (!p || i === this.here) return;
     this.here = i;
-    ENG.goTo({ ...p.key, gen: 0 }, { step: p.n, kind: 'again' });
+    ENG.journey.kinRun = 0;
+    ENG.goTo({ ...p.key, gen: 0 }, { step: p.n - 1, kind: 'again' });
     this.drawLine();
     this.toast(`Plate ${p.n}`);
   },
@@ -105,6 +106,10 @@ const UI = {
     if (!hasAudio) { this.toast('No sound in this browser'); return; }
     if (on && !AUDIO.ready) { if (!AUDIO.init()) { this.toast('No sound in this browser'); return; } if (ENG.cur) AUDIO.enter(ENG.cur.g.audio); }
     this.soundOn = !!on; AUDIO.setEnabled(this.soundOn);
+    if (on) {                                              // catch the score up with whatever happened in silence
+      AUDIO.setPaused(ENG.paused);
+      if (ENG.doors) AUDIO.setDestinations(ENG.cand[0] && ENG.cand[0].g.audio, ENG.cand[1] && ENG.cand[1].g.audio);
+    }
     $('b-sound').setAttribute('aria-pressed', String(this.soundOn));
     this.store.sound = this.soundOn; this.save();
   },
@@ -167,7 +172,7 @@ const UI = {
   fullscreen() {
     const d = document, el = d.documentElement;
     if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-    else { const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) f.call(el).catch(() => {}); }
+    else { const f = el.requestFullscreen || el.webkitRequestFullscreen; if (f) { const r = f.call(el); if (r && r.catch) r.catch(() => {}); } }
   },
 
   // ---- wiring ----
@@ -195,7 +200,7 @@ const UI = {
     canvas.addEventListener('pointermove', (e) => {
       this.wake();
       if (e.pointerType === 'mouse') lookTo(e.clientX, e.clientY, canvas.getBoundingClientRect());
-      else if (drag) {
+      else if (drag && drag.id === e.pointerId) {
         const L = ENG.look;
         L.tyaw = clamp(drag.yaw - (e.clientX - drag.x) / canvas.clientWidth * 1.5, -0.62, 0.62);
         L.tpitch = clamp(drag.pitch + (e.clientY - drag.y) / canvas.clientHeight * 0.9, -0.3, 0.34);
@@ -205,10 +210,12 @@ const UI = {
     canvas.addEventListener('pointerdown', (e) => {
       this.wake();
       if (!$('more').hidden) { this.setMore(false); return; }
-      drag = { x: e.clientX, y: e.clientY, yaw: ENG.look.tyaw, pitch: ENG.look.tpitch, t: performance.now() };
+      if (drag) return;                                     // a second finger does not take over
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, yaw: ENG.look.tyaw, pitch: ENG.look.tpitch, t: performance.now() };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not capturable */ }
     });
     canvas.addEventListener('pointerup', (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
       // a tap on a door chooses it
       if (drag && performance.now() - drag.t < 350 && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 9 && ENG.doors) {
         const r = canvas.getBoundingClientRect();
@@ -221,11 +228,15 @@ const UI = {
       }
       drag = null;
     });
-    canvas.addEventListener('pointerleave', () => { drag = null; });
+    canvas.addEventListener('pointercancel', () => { drag = null; });
 
     window.addEventListener('keydown', (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (!$('veil').classList.contains('gone') && !$('veil').classList.contains('open')) { if (e.key === 'Enter') { e.preventDefault(); this.begin(false); } return; }
+      if (!$('veil').classList.contains('gone') && !$('veil').classList.contains('open')) {
+        // Enter starts quietly, but only once the way in is offered, and never in place of a focused button
+        if (e.key === 'Enter' && this.offered && !(e.target && e.target.tagName === 'BUTTON')) { e.preventDefault(); this.begin(false); }
+        return;
+      }
       const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, L = ENG.look;
       const nudge = (dy, dp) => { L.tyaw = clamp(L.tyaw + dy, -0.62, 0.62); L.tpitch = clamp(L.tpitch + dp, -0.3, 0.34); L.idle = 0; };
       const tag = (e.target && e.target.tagName) || '';
@@ -265,6 +276,7 @@ const UI = {
 
   // the first world is ready behind the veil: show it through a hole, and offer the two ways in
   offer() {
+    this.offered = true;
     $('veil-sub').textContent = 'a survey of places that do not exist';
     $('veil-go').hidden = false; $('veil-note').hidden = false;
     $('veil').classList.add('peek');
@@ -306,6 +318,7 @@ const UI = {
   frame(dt) {
     this.idleT += dt;
     if (this.idleT > 4.5 && $('more').hidden) document.body.classList.add('idle');
+    if ($('b-stay').getAttribute('aria-pressed') === 'true' && !ENG.linger) { $('b-stay').setAttribute('aria-pressed', 'false'); this.toast('Going on.'); }
     if (!$('more').hidden && (ENG.frame & 31) === 0) this.stat();
     if (hasAudio && AUDIO.ready) {
       const D = ENG.doors, w = ENG.cur;
