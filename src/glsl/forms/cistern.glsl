@@ -30,7 +30,7 @@ float shafts(vec3 ro, vec3 rd, float t, float jit) {
   if (uTr[6] < 0.01 || uTr[13] > 0.5 || uSunDir.y < 0.05) return 0.0;
   float far = min(t, 5.0 * uTr[0]), s = 0.0;
   for (int i = uZero; i < 14; i++) {
-    float f = (float(i) + 0.3 + 0.4 * jit) / 14.0;
+    float f = (float(i) + 0.5) / 14.0;
     vec3 p = ro + rd * far * f;
     s += inBeam(p) * step(p.y, uTr[1]) * exp(-far * f * uAir.x * 1.5);
   }
@@ -46,6 +46,9 @@ float map(vec3 p) {
   // which column is nearest, to find the odd one
   float cz = floor(p.z / S + 0.5), side = sign(p.x);
   bool odd = uTr[9] > 0.5 && abs(cz - uTr[8]) < 0.5 && abs(p.x) < S && side * uTr[10] > 0.0;
+  // without a roof you can see a long way: far columns go down into the water before they blur
+  float lod = uTr[13] > 0.5 ? 1.0 - smoothstep(9.0 * S, 13.0 * S, length(p.xz - uCamP.xz)) : 1.0;
+  H *= lod; h0 *= lod;
   float top = uTr[5] > 0.5 ? h0 + 0.3 : H;
   float col = uTr[4] < 0.5 ? length(vec2(cu, cv)) - r : max(cu, cv) - r * 0.9;
   col = max(col, p.y - top);

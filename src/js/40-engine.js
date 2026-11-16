@@ -110,7 +110,7 @@ const ENG = {
   childKeys(w) {
     const j = this.journey, k = w.key;
     const r = stream(mix32(j.seed ^ Math.imul(j.step + 1, 0x9e3779b1)), 'next');
-    const kin = { base: k.base, change: mix32((k.change || 0) + 0x632be5ab + j.step) || 1, heir: k.heir, age: (k.age || 0) + 1, gen: (k.gen || 0) + 1 };
+    const kin = { base: k.base, change: mix32((k.change || 0) + 0x632be5ab + j.step) || 1, heir: k.heir, age: (k.age || 0) + 1, gen: (k.gen || 0) + 1, form: k.form };
     let base = (r() * 4294967296) >>> 0;
     const keepHeir = r() < 0.4;
     const stranger = { base, change: 0, heir: keepHeir ? k.heir : (r() * 4294967296) >>> 0, age: keepHeir ? (k.age || 0) + 1 : 0, gen: (k.gen || 0) + 1 };

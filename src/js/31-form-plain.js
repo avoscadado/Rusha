@@ -29,7 +29,6 @@ FORMS.plain = {
     const oz = Math.round((g.speed * r.range(15, 21)) / spacing), ox = r.chance(0.5) ? 0 : -1;
     g.tr.set([kind, spacing, H, kind === 2 ? 0.8 : r.range(0, 0.22), kind === 5 ? 0.45 : r.range(0.78, 1), odd ? ox : 9999, oz, odd, 0, r.int(0, 1), W]);
     if (r.chance(0.55)) g.sea = [2, 0.03, r.range(0.4, 1), 0];
-    else if (r.chance(0.4)) g.tr[8] = r.range(2, 5);          // dry ground may roll a little
     g.floodTo = 0.6; g.mistTop = H * 0.55 + 1;
     g.door = { r: 5.5, kin: [0, 0.6], stranger: [10, 7.5] };
     g.pulse = spacing;
