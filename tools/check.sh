@@ -9,6 +9,7 @@ FAIL=0
 step() { echo "== $1"; shift; "$@" || { echo "   FAILED: $*"; FAIL=1; }; }
 
 step "build" node build.mjs
+step "census" sh -c "node tools/census.mjs 3000 > '$OUT/census.log'"
 FORMS=$(ls src/glsl/forms | sed 's/\.glsl$//')
 for f in $FORMS; do
   step "sheet $f" sh -c "node tools/shot.mjs '$OUT/sheet-$f.jpg' 'seed={}&form=$f' --t 18 --sheet K1,K2,K3,K4,K5,K6 --cols 3 --w 480 --h 270 > '$OUT/sheet-$f.log'"
