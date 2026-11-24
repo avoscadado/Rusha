@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teeter</title>
+<style>
+  :root {
+    --bg: #14171c; --panel: #1d2128; --ink: #e8e6df; --dim: #8b929c;
+    --fruit: #e5533d; --marble: #aeb7c2; --snake: #63c174; --gold: #e9b949;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(ellipse at 50% 35%, #1f242c 0%, var(--bg) 70%);
+    color: var(--ink); overflow: hidden; user-select: none; -webkit-user-select: none;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  #hud {
+    display: flex; align-items: center; gap: 22px; padding: 6px 4px 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat { display: flex; flex-direction: column; min-width: 64px; }
+  .stat b { font-size: 11px; letter-spacing: .12em; color: var(--dim); font-weight: 600; }
+  .stat span { font-size: 19px; font-weight: 600; white-space: nowrap; }
+  #stageName { font-size: 12px; color: var(--dim); font-weight: 400; margin-left: 6px; }
+  #bar { width: 150px; height: 8px; background: #2a3039; border-radius: 4px; overflow: hidden; margin-top: 7px; }
+  #barFill { height: 100%; width: 0; background: var(--fruit); border-radius: 4px; transition: width .15s; }
+  #lives i { display: inline-block; width: 11px; height: 11px; border-radius: 50%; background: var(--snake); margin-right: 4px; }
+  #lives i.gone { background: #333a44; }
+  #gauge { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  #gauge small { color: var(--dim); font-size: 11px; line-height: 1.5; }
+  #gauge small u { text-decoration: none; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; border: 2px solid; }
+  #stage { perspective: 1500px; position: relative; }
+  #tray {
+    position: relative; border-radius: 14px; transform-style: preserve-3d;
+    transition: transform .14s linear;
+    box-shadow: 0 0 0 3px #3a424d, 0 9px 0 3px #262c34, 0 34px 60px rgba(0,0,0,.55);
+  }
+  #board { display: block; border-radius: 14px; }
+  #overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(15,17,21,.80); border-radius: 14px; text-align: center; padding: 20px;
+  }
+  #overlay.hidden { display: none; }
+  #card { max-width: 560px; }
+  #card h1 { font-size: 46px; letter-spacing: .16em; margin: 0 0 4px; font-weight: 700; }
+  #card h2 { font-size: 28px; margin: 0 0 8px; font-weight: 650; }
+  #card p { margin: 9px 0; color: #c9cdd3; }
+  #card .rules { text-align: left; margin: 14px auto; padding: 0; list-style: none; }
+  #card .rules li { margin: 7px 0; padding-left: 20px; position: relative; color: #c9cdd3; }
+  #card .rules li::before { content: ""; position: absolute; left: 2px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: var(--snake); }
+  #card .go { margin-top: 16px; color: var(--ink); font-weight: 600; }
+  #card .keys { font-size: 12.5px; color: var(--dim); }
+  kbd { font: inherit; font-size: 12px; background: #2a3039; border-radius: 4px; padding: 1px 6px; border-bottom: 2px solid #171a1f; color: var(--ink); }
+  #banner {
+    position: absolute; left: 0; right: 0; top: 16%; text-align: center; pointer-events: none;
+    font-size: 26px; font-weight: 650; letter-spacing: .05em; opacity: 0; transition: opacity .4s;
+    text-shadow: 0 2px 12px rgba(0,0,0,.8);
+  }
+  #banner.show { opacity: 1; }
+  #banner small { display: block; font-size: 14px; font-weight: 400; color: #c9cdd3; letter-spacing: 0; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="stat"><b>STAGE</b><span><span id="stageNum">1</span><span id="stageName"></span></span></div>
+  <div class="stat"><b>FRUIT</b><span id="fruitTxt">0 / 5</span><div id="bar"><div id="barFill"></div></div></div>
+  <div class="stat"><b>SCORE</b><span id="score">0</span></div>
+  <div class="stat"><b>STREAK</b><span id="mult">x1</span></div>
+  <div class="stat"><b>LIVES</b><span id="lives"></span></div>
+  <div class="stat"><b>BEST</b><span id="best">0</span></div>
+  <div id="gauge">
+    <canvas id="level" width="64" height="64"></canvas>
+    <small><u style="border-color:var(--marble)"></u>marbles roll<br><u style="border-color:var(--fruit)"></u>fruit rolls</small>
+  </div>
+</div>
+<div id="stage">
+  <div id="tray">
+    <canvas id="board"></canvas>
+    <div id="banner"></div>
+    <div id="overlay"><div id="card"></div></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   TEETER
+   A snake game played on a tray balanced on a single central pivot.
+   The snake has weight. The tray tips toward wherever the snake's body
+   is, and everything loose on it (fruit, steel marbles) rolls downhill.
+
+   Layout of this file:
+     1. CONFIG      tuning numbers
+     2. CORE        pure game rules, no DOM (testable headlessly)
+     3. RENDER      canvas drawing
+     4. AUDIO       tiny synthesized blips
+     5. APP         input, overlays, HUD, main loop
+   ===================================================================== */
+
+/* ------------------------------ 1. CONFIG ----------------------------- */
+const CONFIG = {
+  W: 40, H: 28,                 // grid (classic snake boards are roughly 17x15 to 20x20)
+  START_LEN: 5,
+  GROW_PER_FRUIT: 2,
+  LIVES: 3, MAX_LIVES: 5,
+  FINAL_STAGE: 10,
+  TILT_LERP: 0.2,               // how quickly the tray follows the snake's weight
+  MASS_BASE: 0.30, MASS_DIV: 60, MASS_MAX: 1.5,
+  LAND_TICKS: 14,               // warning time before a marble lands
+  PHYS: {
+    //        tilt needed   push   friction  top speed (cells per tick, snake = 1)
+    ball:  { thr: 0.10, acc: 0.10, fr: 0.97, vmax: 0.75 },
+    fruit: { thr: 0.30, acc: 0.06, fr: 0.95, vmax: 0.45 },
+  },
+  STAGES: [
+    // need = fruit to clear, tick = ms per snake step, balls = max marbles on tray
+    { name: "Level Ground",  need: 8,  tick: 125, balls: 0, every: 60, fruit: 3 },
+    { name: "First Marble",  need: 10, tick: 120, balls: 1, every: 55, fruit: 3 },
+    { name: "A Pair",        need: 12, tick: 115, balls: 2, every: 50, fruit: 3 },
+    { name: "Leaning",       need: 14, tick: 110, balls: 3, every: 48, fruit: 3 },
+    { name: "Heavy Middle",  need: 15, tick: 105, balls: 3, every: 44, fruit: 3 },
+    { name: "Crowded Tray",  need: 16, tick: 100, balls: 4, every: 40, fruit: 4 },
+    { name: "Quick Feet",    need: 17, tick: 95,  balls: 5, every: 38, fruit: 4 },
+    { name: "Landslide",     need: 18, tick: 90,  balls: 5, every: 34, fruit: 4 },
+    { name: "Long Body",     need: 19, tick: 85,  balls: 6, every: 32, fruit: 4 },
+    { name: "Tipping Point", need: 21, tick: 80,  balls: 7, every: 30, fruit: 4 },
+  ],
+  ENDLESS: { name: "Endless", need: 15, tick: 76, balls: 8, every: 28, fruit: 4 },
+};
+const DIRS = { up: {x:0,y:-1}, down: {x:0,y:1}, left: {x:-1,y:0}, right: {x:1,y:0} };
+const OPP  = { up: "down", down: "up", left: "right", right: "left" };
+
+/* ------------------------------- 2. CORE ------------------------------ */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function createCore(seed) {
+  const { W, H } = CONFIG;
+  const rnd = mulberry32(seed >>> 0);
+  const idx = (x, y) => y * W + x;
+  const S = {
+    W, H,
+    snake: [], occ: new Uint8Array(W * H), objAt: new Array(W * H).fill(null),
+    objs: [], landing: [],
+    dir: "right", queue: [], grow: 0, prevTail: null,
+    tilt: { x: 0, y: 0 }, com: { x: (W - 1) / 2, y: (H - 1) / 2 },
+    stage: 1, stageFruit: 0, totalFruit: 0, score: 0, streak: 0,
+    lives: CONFIG.LIVES, tick: 0, spilled: 0, dumped: 0,
+    status: "ready",            // ready | playing | dead | over | won
+    deathReason: "", endless: false,
+    ballTimer: 0, fruitTimer: 0, nextId: 1,
+    events: [],                 // drained by the UI for sound and popups
+  };
+
+  const stageCfg = () => CONFIG.STAGES[S.stage - 1] || CONFIG.ENDLESS;
+  const mult = () => 1 + Math.min(4, Math.floor(S.streak / 4));
+  const emit = (type, data) => S.events.push(Object.assign({ type }, data));
+
+  function removeObj(o) {
+    o.dead = true;
+    S.objAt[idx(o.x, o.y)] = null;
+    const i = S.objs.indexOf(o);
+    if (i >= 0) S.objs.splice(i, 1);
+  }
+  function addObj(type, x, y) {
+    const o = { id: S.nextId++, type, x, y, vx: 0, vy: 0, ax: 0, ay: 0, dead: false };
+    S.objs.push(o); S.objAt[idx(x, y)] = o;
+    return o;
+  }
+
+  function placeSnake(len) {
+    for (const s of S.snake) S.occ[idx(s.x, s.y)] = 0;
+    S.snake = [];
+    const cx = Math.floor(W / 2), cy = Math.floor(H / 2);
+    for (let i = 0; i < CONFIG.START_LEN; i++) {
+      const x = cx - i, n = idx(x, cy);
+      if (S.objAt[n]) removeObj(S.objAt[n]);
+      S.snake.push({ x, y: cy }); S.occ[n] = 1;
+    }
+    S.grow = Math.max(0, len - CONFIG.START_LEN);
+    S.dir = "right"; S.queue = []; S.prevTail = null;
+    S.tilt.x = 0; S.tilt.y = 0;
+    computeCom();
+  }
+
+  function computeCom() {
+    let sx = 0, sy = 0;
+    for (const s of S.snake) { sx += s.x; sy += s.y; }
+    const n = S.snake.length;
+    S.com.x = sx / n; S.com.y = sy / n;
+    const hx = (W - 1) / 2, hy = (H - 1) / 2;
+    // Torque: how far the body's centre sits from the pivot, scaled by how heavy the body is.
+    const mass = Math.min(CONFIG.MASS_MAX, CONFIG.MASS_BASE + n / CONFIG.MASS_DIV);
+    let tx = (S.com.x - hx) / hx * mass, ty = (S.com.y - hy) / hy * mass;
+    const m = Math.hypot(tx, ty);
+    if (m > 1) { tx /= m; ty /= m; }
+    return { x: tx, y: ty };
+  }
+
+  function die(reason) {
+    S.lives--; S.streak = 0; S.deathReason = reason;
+    S.status = S.lives > 0 ? "dead" : "over";
+    emit("die", { reason });
+  }
+
+  function eat(o) {
+    const x = o.x, y = o.y;
+    removeObj(o);
+    S.grow += CONFIG.GROW_PER_FRUIT;
+    S.streak++; S.stageFruit++; S.totalFruit++;
+    const pts = 10 * mult();
+    S.score += pts;
+    emit("eat", { x, y, pts });
+  }
+
+  // Try to roll an object one cell. Returns "moved", "blocked" or "gone".
+  function tryStep(o, dx, dy) {
+    const nx = o.x + dx, ny = o.y + dy;
+    if (nx < 0 || ny < 0 || nx >= W || ny >= H) {
+      const x = o.x, y = o.y;
+      removeObj(o);
+      if (o.type === "fruit") { S.spilled++; S.streak = 0; emit("spill", { x, y }); }
+      else { S.dumped++; const pts = 15 * mult(); S.score += pts; emit("dump", { x, y, pts }); }
+      return "gone";
+    }
+    const n = idx(nx, ny);
+    if (S.occ[n]) {
+      const h = S.snake[0];
+      if (h.x === nx && h.y === ny) {            // rolled into the snake's mouth
+        if (o.type === "fruit") { eat(o); return "gone"; }
+        removeObj(o); die("ball"); return "gone";
+      }
+      return "blocked";                          // the body is a wall
+    }
+    if (S.objAt[n]) return "blocked";
+    S.objAt[idx(o.x, o.y)] = null;
+    o.x = nx; o.y = ny; S.objAt[n] = o;
+    return "moved";
+  }
+
+  function moveObjects() {
+    const tx = S.tilt.x, ty = S.tilt.y, mag = Math.hypot(tx, ty);
+    // Downhill-most objects go first so a row of them rolls together instead of jamming.
+    const order = S.objs.slice().sort((a, b) => (b.x * tx + b.y * ty) - (a.x * tx + a.y * ty));
+    for (const o of order) {
+      if (o.dead) continue;
+      const P = CONFIG.PHYS[o.type];
+      if (mag > P.thr) {
+        const a = P.acc * (mag - P.thr) / (1 - P.thr);
+        o.vx = (o.vx + tx / mag * a) * P.fr;
+        o.vy = (o.vy + ty / mag * a) * P.fr;
+      } else {
+        o.vx *= 0.6; o.vy *= 0.6; o.ax *= 0.8; o.ay *= 0.8;
+        if (Math.abs(o.vx) < 0.02) o.vx = 0;
+        if (Math.abs(o.vy) < 0.02) o.vy = 0;
+      }
+      const sp = Math.hypot(o.vx, o.vy);
+      if (sp > P.vmax) { o.vx *= P.vmax / sp; o.vy *= P.vmax / sp; }
+      // ax, ay are the sub-cell offset in (-0.5, 0.5]; crossing half a cell means changing cell.
+      o.ax += o.vx;
+      if (Math.abs(o.ax) > 0.5) {
+        const s = Math.sign(o.ax), r = tryStep(o, s, 0);
+        if (r === "gone") { if (S.status !== "playing") return; continue; }
+        if (r === "moved") o.ax -= s; else { o.ax = 0; o.vx = 0; }
+      }
+      o.ay += o.vy;
+      if (Math.abs(o.ay) > 0.5) {
+        const s = Math.sign(o.ay), r = tryStep(o, 0, s);
+        if (r === "gone") { if (S.status !== "playing") return; continue; }
+        if (r === "moved") o.ay -= s; else { o.ay = 0; o.vy = 0; }
+      }
+    }
+  }
+
+  function freeCell(margin, minHeadDist) {
+    const h = S.snake[0];
+    const ok = (x, y) => {
+      const n = idx(x, y);
+      if (S.occ[n] || S.objAt[n]) return false;
+      if (Math.abs(x - h.x) + Math.abs(y - h.y) < minHeadDist) return false;
+      for (const l of S.landing) if (l.x === x && l.y === y) return false;
+      return true;
+    };
+    for (let i = 0; i < 80; i++) {
+      const x = margin + Math.floor(rnd() * (W - 2 * margin));
+      const y = margin + Math.floor(rnd() * (H - 2 * margin));
+      if (ok(x, y)) return { x, y };
+    }
+    // Crowded board: fall back to an exhaustive scan from a random offset.
+    const start = Math.floor(rnd() * W * H);
+    for (let k = 0; k < W * H; k++) {
+      const n = (start + k) % (W * H), x = n % W, y = (n / W) | 0;
+      if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;
+      if (ok(x, y)) return { x, y };
+    }
+    return null;
+  }
+
+  function spawns() {
+    const cfg = stageCfg();
+    let fruit = 0, balls = 0;
+    for (const o of S.objs) o.type === "fruit" ? fruit++ : balls++;
+    if (fruit < cfg.fruit) {
+      if (--S.fruitTimer <= 0) {
+        const c = freeCell(3, 5);
+        if (c) { addObj("fruit", c.x, c.y); emit("fruit", c); }
+        S.fruitTimer = 4;
+      }
+    }
+    for (let i = S.landing.length - 1; i >= 0; i--) {
+      const l = S.landing[i];
+      if (--l.t > 0) continue;
+      const n = idx(l.x, l.y);
+      if (S.occ[n] || S.objAt[n]) { l.t = 3; continue; }   // wait for the cell to clear
+      S.landing.splice(i, 1);
+      addObj("ball", l.x, l.y); emit("land", { x: l.x, y: l.y });
+    }
+    if (balls + S.landing.length < cfg.balls) {
+      if (--S.ballTimer <= 0) {
+        const c = freeCell(2, 8);
+        if (c) S.landing.push({ x: c.x, y: c.y, t: CONFIG.LAND_TICKS });
+        S.ballTimer = cfg.every;
+      }
+    }
+  }
+
+  function checkStage() {
+    if (S.stageFruit < stageCfg().need) return;
+    S.score += 100 * S.stage;
+    const cleared = S.stage;
+    S.stage++; S.stageFruit = 0;
+    let life = false;
+    if (cleared % 3 === 0 && S.lives < CONFIG.MAX_LIVES) { S.lives++; life = true; }
+    if (cleared === CONFIG.FINAL_STAGE && !S.endless) { S.status = "won"; emit("win", {}); return; }
+    S.ballTimer = Math.min(S.ballTimer, 12);
+    emit("stage", { stage: S.stage, life });
+  }
+
+  function step() {
+    if (S.status !== "playing") return;
+    S.tick++;
+    if (S.queue.length) S.dir = S.queue.shift();
+    const d = DIRS[S.dir], head = S.snake[0];
+    const nx = head.x + d.x, ny = head.y + d.y;
+    if (nx < 0 || ny < 0 || nx >= W || ny >= H) return die("edge");
+    if (S.grow > 0) { S.grow--; S.prevTail = null; }
+    else { const t = S.snake.pop(); S.occ[idx(t.x, t.y)] = 0; S.prevTail = t; }
+    const n = idx(nx, ny);
+    if (S.occ[n]) return die("self");
+    const o = S.objAt[n];
+    if (o) { if (o.type === "ball") return die("ball"); eat(o); }
+    S.snake.unshift({ x: nx, y: ny }); S.occ[n] = 1;
+    const target = computeCom();
+    S.tilt.x += (target.x - S.tilt.x) * CONFIG.TILT_LERP;
+    S.tilt.y += (target.y - S.tilt.y) * CONFIG.TILT_LERP;
+    moveObjects();
+    if (S.status !== "playing") return;
+    spawns();
+    checkStage();
+  }
+
+  function input(name) {
+    if (!DIRS[name]) return false;
+    if (S.status === "ready") {
+      // The waiting snake is a straight five-cell line, so it can safely face either way.
+      if (name === OPP[S.dir] && S.snake.length === CONFIG.START_LEN) { S.snake.reverse(); S.dir = name; }
+      else if (name !== OPP[S.dir]) S.dir = name;
+      S.status = "playing";
+      return true;
+    }
+    if (S.status !== "playing") return false;
+    const last = S.queue.length ? S.queue[S.queue.length - 1] : S.dir;
+    if (name === last || name === OPP[last] || S.queue.length >= 3) return false;
+    S.queue.push(name);
+    return true;
+  }
+
+  function respawn() {
+    if (S.status !== "dead") return;
+    for (const o of S.objs.slice()) if (o.type === "ball") removeObj(o); else { o.vx = o.vy = o.ax = o.ay = 0; }
+    S.landing = [];
+    const keep = Math.max(CONFIG.START_LEN, Math.floor((S.snake.length + S.grow) / 2));
+    placeSnake(keep);
+    S.ballTimer = stageCfg().every;
+    S.status = "ready";
+  }
+
+  function continueEndless() {
+    if (S.status !== "won") return;
+    S.endless = true; S.status = "playing";
+    emit("stage", { stage: S.stage, life: false });
+  }
+
+  placeSnake(CONFIG.START_LEN);
+  S.ballTimer = 20;
+  for (let i = 0; i < stageCfg().fruit; i++) { const c = freeCell(3, 5); if (c) addObj("fruit", c.x, c.y); }
+
+  return { S, step, input, respawn, continueEndless, stageCfg, mult };
+}
+
+/* ------------------------------ 3. RENDER ----------------------------- */
+const CELL = 24;
+const board = document.getElementById("board");
+const ctx = board.getContext("2d");
+const levelCv = document.getElementById("level");
+const lctx = levelCv.getContext("2d");
+const trayEl = document.getElementById("tray");
+let viewScale = 1, view3d = !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+const shown = new Map();        // object id -> smoothed on-screen position
+let popups = [];                // floating score text
+let shake = 0;
+
+function fitCanvas() {
+  const bw = CONFIG.W * CELL, bh = CONFIG.H * CELL;
+  const hud = document.getElementById("hud").offsetHeight;
+  viewScale = Math.max(0.3, Math.min((innerWidth - 70) / bw, (innerHeight - hud - 70) / bh, 1.6));
+  const dpr = window.devicePixelRatio || 1;
+  board.style.width = Math.round(bw * viewScale) + "px";
+  board.style.height = Math.round(bh * viewScale) + "px";
+  board.width = Math.round(bw * viewScale * dpr);
+  board.height = Math.round(bh * viewScale * dpr);
+  document.getElementById("hud").style.width = board.style.width;
+  levelCv.width = levelCv.height = 64 * dpr;
+  levelCv.style.width = levelCv.style.height = "64px";
+}
+
+function drawBoard(core, f, now) {
+  const S = core.S, dpr = window.devicePixelRatio || 1, k = viewScale * dpr;
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  const bw = S.W * CELL, bh = S.H * CELL;
+  if (shake > 0.2) { ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake); shake *= 0.85; }
+
+  // Tray surface, shaded so the low (heavy) side reads darker.
+  const g = ctx.createLinearGradient(bw / 2 - S.tilt.x * bw / 2, bh / 2 - S.tilt.y * bh / 2,
+                                     bw / 2 + S.tilt.x * bw / 2 + 0.01, bh / 2 + S.tilt.y * bh / 2 + 0.01);
+  g.addColorStop(0, "#333b46"); g.addColorStop(1, "#232830");
+  ctx.fillStyle = Math.hypot(S.tilt.x, S.tilt.y) > 0.02 ? g : "#2b323b";
+  ctx.fillRect(-20, -20, bw + 40, bh + 40);
+  ctx.fillStyle = "rgba(255,255,255,.028)";
+  for (let y = 0; y < S.H; y++) for (let x = (y & 1); x < S.W; x += 2) ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+  // Danger rim: nothing stops you (or anything else) at the edge.
+  ctx.strokeStyle = "rgba(233,185,73,.35)"; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+  ctx.strokeRect(1.5, 1.5, bw - 3, bh - 3); ctx.setLineDash([]);
+
+  // Pivot and centre of mass.
+  const px = bw / 2, py = bh / 2;
+  const cx = (S.com.x + .5) * CELL, cy = (S.com.y + .5) * CELL;
+  ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(cx, cy); ctx.stroke();
+  ctx.beginPath(); ctx.arc(px, py, 7, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(px - 11, py); ctx.lineTo(px + 11, py); ctx.moveTo(px, py - 11); ctx.lineTo(px, py + 11); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx + 6, cy); ctx.lineTo(cx, cy + 6); ctx.lineTo(cx - 6, cy); ctx.fill();
+
+  // Marble landing warnings.
+  for (const l of S.landing) {
+    const x = (l.x + .5) * CELL, y = (l.y + .5) * CELL, p = Math.max(0, l.t) / CONFIG.LAND_TICKS;
+    ctx.strokeStyle = "rgba(233,185,73,.9)"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, CELL * (.35 + p * .9), 0, 7); ctx.stroke();
+    ctx.fillStyle = "rgba(233,185,73," + (.25 + .25 * Math.sin(now / 60)) + ")";
+    ctx.beginPath(); ctx.arc(x, y, CELL * .3, 0, 7); ctx.fill();
+  }
+
+  // Rolling things, eased toward their true position so cell changes look like rolling.
+  const live = new Set();
+  for (const o of S.objs) {
+    live.add(o.id);
+    const tx = (o.x + o.ax + .5) * CELL, ty = (o.y + o.ay + .5) * CELL;
+    let p = shown.get(o.id);
+    if (!p) { p = { x: tx, y: ty, born: now }; shown.set(o.id, p); }
+    p.x += (tx - p.x) * 0.3; p.y += (ty - p.y) * 0.3;
+    const pop = Math.min(1, (now - p.born) / 180), r = CELL * 0.4 * pop;
+    ctx.fillStyle = "rgba(0,0,0,.3)";
+    ctx.beginPath(); ctx.ellipse(p.x + 2 + S.tilt.x * 3, p.y + 4 + S.tilt.y * 3, r, r * .8, 0, 0, 7); ctx.fill();
+    if (o.type === "fruit") {
+      ctx.fillStyle = "#e5533d"; ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.35)"; ctx.beginPath(); ctx.arc(p.x - r * .35, p.y - r * .35, r * .25, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#6fbf73"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(p.x, p.y - r * .8); ctx.lineTo(p.x + r * .5, p.y - r * 1.25); ctx.stroke();
+    } else {
+      const mg = ctx.createRadialGradient(p.x - r * .4, p.y - r * .4, r * .1, p.x, p.y, r * 1.1);
+      mg.addColorStop(0, "#f2f5f8"); mg.addColorStop(.5, "#aeb7c2"); mg.addColorStop(1, "#59626e");
+      ctx.fillStyle = mg; ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.08, 0, 7); ctx.fill();
+    }
+  }
+  for (const id of shown.keys()) if (!live.has(id)) shown.delete(id);
+
+  // Snake: one thick rounded line through the cell centres, head and tail tip interpolated.
+  const sn = S.snake, moving = S.status === "playing" && sn.length > 1 && S.tick > 0;
+  const t = moving ? f : 1, c = (v) => (v + .5) * CELL;
+  const pts = [];
+  if (sn.length > 1) pts.push([c(sn[1].x + (sn[0].x - sn[1].x) * t), c(sn[1].y + (sn[0].y - sn[1].y) * t)]);
+  else pts.push([c(sn[0].x), c(sn[0].y)]);
+  for (let i = 1; i < sn.length; i++) pts.push([c(sn[i].x), c(sn[i].y)]);
+  const last = sn[sn.length - 1];
+  if (S.prevTail && moving) pts.push([c(S.prevTail.x + (last.x - S.prevTail.x) * t), c(S.prevTail.y + (last.y - S.prevTail.y) * t)]);
+  const dead = S.status === "dead" || S.status === "over";
+  const path = () => { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]); };
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.strokeStyle = "rgba(0,0,0,.28)"; ctx.lineWidth = CELL * .8;
+  ctx.save(); ctx.translate(2 + S.tilt.x * 3, 4 + S.tilt.y * 3); path(); ctx.stroke(); ctx.restore();
+  ctx.strokeStyle = dead ? "#7d8792" : "#3f9d57"; ctx.lineWidth = CELL * .8; path(); ctx.stroke();
+  ctx.strokeStyle = dead ? "#9aa3ad" : "#63c174"; ctx.lineWidth = CELL * .5; path(); ctx.stroke();
+  // Head.
+  const hx = pts[0][0], hy = pts[0][1], d = DIRS[S.dir];
+  ctx.fillStyle = dead ? "#aab2bb" : "#86d994";
+  ctx.beginPath(); ctx.arc(hx, hy, CELL * .46, 0, 7); ctx.fill();
+  ctx.fillStyle = "#14171c";
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.arc(hx + d.x * CELL * .16 + -d.y * s * CELL * .2, hy + d.y * CELL * .16 + d.x * s * CELL * .2, CELL * .085, 0, 7);
+    ctx.fill();
+  }
+
+  // Popups.
+  ctx.textAlign = "center"; ctx.font = "600 14px -apple-system, Helvetica, Arial, sans-serif";
+  popups = popups.filter(p => now - p.t0 < 900);
+  for (const p of popups) {
+    const a = (now - p.t0) / 900;
+    ctx.globalAlpha = 1 - a; ctx.fillStyle = p.color;
+    ctx.fillText(p.text, Math.max(40, Math.min(bw - 40, (p.x + .5) * CELL)), Math.max(18, (p.y + .5) * CELL - 10 - a * 26));
+  }
+  ctx.globalAlpha = 1;
+
+  if (S.status === "ready" && started && !paused) {
+    ctx.fillStyle = "rgba(232,230,223,.9)"; ctx.font = "600 17px -apple-system, Helvetica, Arial, sans-serif";
+    ctx.fillText("Press an arrow key to start moving", bw / 2, bh / 2 + 62);
+  }
+}
+
+function drawLevel(core) {
+  const dpr = window.devicePixelRatio || 1, S = core.S, R = 28;
+  lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  lctx.clearRect(0, 0, 64, 64);
+  lctx.fillStyle = "#1d2128"; lctx.beginPath(); lctx.arc(32, 32, R + 3, 0, 7); lctx.fill();
+  lctx.lineWidth = 1.5;
+  lctx.strokeStyle = "#aeb7c2"; lctx.beginPath(); lctx.arc(32, 32, R * Math.sqrt(CONFIG.PHYS.ball.thr), 0, 7); lctx.stroke();
+  lctx.strokeStyle = "#e5533d"; lctx.beginPath(); lctx.arc(32, 32, R * Math.sqrt(CONFIG.PHYS.fruit.thr), 0, 7); lctx.stroke();
+  lctx.strokeStyle = "#3a424d"; lctx.beginPath(); lctx.arc(32, 32, R, 0, 7); lctx.stroke();
+  const m = Math.hypot(S.tilt.x, S.tilt.y);
+  lctx.fillStyle = m > CONFIG.PHYS.fruit.thr ? "#e5533d" : m > CONFIG.PHYS.ball.thr ? "#e9b949" : "#63c174";
+  const gs = m > 1e-6 ? Math.sqrt(Math.min(1, m)) / m : 0;   // square-root scale keeps the small rings readable
+  lctx.beginPath(); lctx.arc(32 + S.tilt.x * gs * R, 32 + S.tilt.y * gs * R, 4.5, 0, 7); lctx.fill();
+}
+
+/* ------------------------------- 4. AUDIO ----------------------------- */
+let actx = null, muted = false;
+function blip(freq, dur, type, vol, slide) {
+  if (muted) return;
+  try {
+    if (!actx) { const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return; actx = new AC(); }
+    if (actx.state === "suspended") actx.resume();
+    const o = actx.createOscillator(), g = actx.createGain(), t = actx.currentTime;
+    o.type = type || "sine"; o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t + dur);
+    g.gain.setValueAtTime(vol || 0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) { /* sound is optional */ }
+}
+
+/* -------------------------------- 5. APP ------------------------------ */
+const $ = (id) => document.getElementById(id);
+const overlay = $("overlay"), card = $("card"), banner = $("banner");
+let core = null, paused = false, started = false, acc = 0, lastT = 0, best = 0, lockUntil = 0, bannerTimer = 0;
+try { best = parseInt(localStorage.getItem("teeter.best"), 10) || 0; } catch (e) {}
+
+const REASONS = { edge: "You slid off the edge of the tray.", self: "You ran into your own body.", ball: "A marble hit your head." };
+
+function show(html) { card.innerHTML = html; overlay.classList.remove("hidden"); }
+function hide() { overlay.classList.add("hidden"); }
+function flashBanner(html, ms) {
+  banner.innerHTML = html; banner.classList.add("show");
+  clearTimeout(bannerTimer); bannerTimer = setTimeout(() => banner.classList.remove("show"), ms || 2200);
+}
+
+function titleScreen() {
+  show(`<h1>TEETER</h1>
+    <p>Snake, on a tray balanced on a single point.</p>
+    <ul class="rules">
+      <li><b>You have weight.</b> The tray tips toward wherever your body is, and the longer you grow the harder it tips.</li>
+      <li><b>Everything loose rolls downhill.</b> Marbles start rolling at a slight lean, fruit at a steeper one. The gauge in the corner shows both limits.</li>
+      <li><b>Eat fruit</b> to clear each stage. Fruit that rolls off the edge is lost and breaks your streak.</li>
+      <li><b>A marble touching your head costs a life.</b> Your body blocks them, and tipping one off the edge scores points.</li>
+      <li><b>The tray has no walls.</b> Slide off, or bite yourself, and you lose a life.</li>
+    </ul>
+    <p class="keys"><kbd>Arrows</kbd> or <kbd>W A S D</kbd> steer &nbsp; <kbd>Space</kbd> pause &nbsp; <kbd>M</kbd> sound &nbsp; <kbd>V</kbd> flat or tilted view</p>
+    <p class="go">Press <kbd>Space</kbd> to begin</p>`);
+}
+
+function newGame() {
+  core = createCore((Date.now() ^ (Math.random() * 1e9)) >>> 0);
+  shown.clear(); popups = []; paused = false; started = true; acc = 0;
+  hide(); updateHud();
+  flashBanner(`Stage 1<small>${CONFIG.STAGES[0].name}</small>`);
+}
+
+function updateHud() {
+  const S = core.S, cfg = core.stageCfg();
+  $("stageNum").textContent = S.stage > CONFIG.FINAL_STAGE ? S.stage : S.stage + " / " + CONFIG.FINAL_STAGE;
+  $("stageName").textContent = cfg.name;
+  $("fruitTxt").textContent = Math.min(S.stageFruit, cfg.need) + " / " + cfg.need;
+  $("barFill").style.width = Math.min(100, 100 * S.stageFruit / cfg.need) + "%";
+  $("score").textContent = S.score;
+  $("mult").textContent = "x" + core.mult();
+  if (S.score > best) { best = S.score; try { localStorage.setItem("teeter.best", String(best)); } catch (e) {} }
+  $("best").textContent = best;
+  let h = "";
+  for (let i = 0; i < Math.max(CONFIG.LIVES, S.lives); i++) h += `<i class="${i < S.lives ? "" : "gone"}"></i>`;
+  if ($("lives").innerHTML !== h) $("lives").innerHTML = h;
+}
+
+function handleEvents() {
+  const S = core.S, now = performance.now();
+  for (const e of S.events) {
+    if (e.type === "eat") { blip(520 + 40 * core.mult(), .09, "triangle", .09, 880); popups.push({ x: e.x, y: e.y, text: "+" + e.pts, color: "#ffd9d2", t0: now }); }
+    else if (e.type === "spill") { blip(300, .25, "sine", .07, 90); popups.push({ x: e.x, y: e.y, text: "fruit lost", color: "#e5533d", t0: now }); }
+    else if (e.type === "dump") { blip(160, .18, "square", .05, 60); popups.push({ x: e.x, y: e.y, text: "marble out +" + e.pts, color: "#e9b949", t0: now }); }
+    else if (e.type === "land") { blip(110, .1, "sine", .09); }
+    else if (e.type === "stage") {
+      blip(660, .12, "triangle", .08); setTimeout(() => blip(880, .18, "triangle", .08), 110);
+      flashBanner(`Stage ${e.stage}<small>${core.stageCfg().name}${e.life ? " &nbsp;·&nbsp; extra life" : ""}</small>`);
+    }
+    else if (e.type === "die") {
+      blip(220, .5, "sawtooth", .08, 50); shake = 14; lockUntil = now + 650;
+      if (S.status === "over") {
+        show(`<h2>Game over</h2><p>${REASONS[e.reason]}</p>
+          <p>Reached stage ${S.stage} with ${S.totalFruit} fruit eaten, ${S.dumped} marbles tipped out, ${S.spilled} fruit lost.</p>
+          <p>Score <b>${S.score}</b> &nbsp; Best <b>${Math.max(best, S.score)}</b></p>
+          <p class="go">Press <kbd>Space</kbd> to play again</p>`);
+      } else {
+        show(`<h2>Life lost</h2><p>${REASONS[e.reason]}</p>
+          <p>${S.lives} ${S.lives === 1 ? "life" : "lives"} left. You come back at half your length, and the marbles are cleared.</p>
+          <p class="go">Press <kbd>Space</kbd> to continue</p>`);
+      }
+    }
+    else if (e.type === "win") {
+      blip(523, .15, "triangle", .09); setTimeout(() => blip(659, .15, "triangle", .09), 140); setTimeout(() => blip(784, .3, "triangle", .09), 280);
+      lockUntil = now + 650;
+      show(`<h2>You kept your balance</h2><p>All ${CONFIG.FINAL_STAGE} stages cleared.</p>
+        <p>${S.totalFruit} fruit eaten, ${S.dumped} marbles tipped out, ${S.spilled} fruit lost.</p>
+        <p>Score <b>${S.score}</b> &nbsp; Best <b>${Math.max(best, S.score)}</b></p>
+        <p class="go">Press <kbd>E</kbd> to keep going in endless mode, or <kbd>Space</kbd> for a new game</p>`);
+    }
+  }
+  S.events.length = 0;
+}
+
+function setPaused(p) {
+  if (!started || !core || (core.S.status !== "playing" && core.S.status !== "ready")) return;
+  paused = p;
+  if (p) show(`<h2>Paused</h2><p class="go">Press <kbd>Space</kbd> to resume</p><p class="keys"><kbd>R</kbd> restart from stage 1</p>`);
+  else { hide(); acc = 0; }
+}
+
+function primary() {                               // Space, Enter or a click
+  const now = performance.now();
+  if (!started) return newGame();
+  if (now < lockUntil) return;
+  const st = core.S.status;
+  if (st === "over" || st === "won") return newGame();
+  if (st === "dead") { core.respawn(); shown.clear(); hide(); acc = 0; updateHud(); return; }
+  setPaused(!paused);
+}
+
+const KEYMAP = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+                 KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right" };
+addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const dir = KEYMAP[e.code];
+  if (dir || e.code === "Space") e.preventDefault();
+  if (e.repeat) return;
+  if (dir) {
+    if (!started || paused) return;
+    const st = core.S.status;
+    if (st === "dead" && performance.now() >= lockUntil) { primary(); return; }
+    if (st === "ready") acc = 0;
+    core.input(dir);
+    return;
+  }
+  switch (e.code) {
+    case "Space": case "Enter": primary(); break;
+    case "KeyP": case "Escape": if (started) setPaused(!paused); break;
+    case "KeyM": muted = !muted; flashBanner(muted ? "Sound off" : "Sound on", 900); break;
+    case "KeyV": view3d = !view3d; flashBanner(view3d ? "Tilted view" : "Flat view", 900); break;
+    case "KeyR": if (started && (paused || core.S.status === "over" || core.S.status === "won")) newGame(); break;
+    case "KeyE": if (started && core.S.status === "won" && performance.now() >= lockUntil) { core.continueEndless(); hide(); acc = 0; handleEvents(); updateHud(); } break;
+  }
+});
+overlay.addEventListener("click", primary);
+addEventListener("blur", () => { if (started && !paused && core.S.status === "playing") setPaused(true); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && started && !paused && core.S.status === "playing") setPaused(true); });
+addEventListener("resize", fitCanvas);
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(250, now - lastT); lastT = now;
+  if (!core) return;
+  const S = core.S;
+  let f = 1;
+  if (!paused && S.status === "playing") {
+    const tickMs = core.stageCfg().tick;
+    acc += dt;
+    let guard = 0;
+    while (acc >= tickMs && S.status === "playing" && guard++ < 5) {
+      acc -= tickMs; core.step();
+      if (S.events.length) handleEvents();
+      updateHud();
+    }
+    if (guard >= 5) acc = 0;
+    f = Math.min(1, acc / tickMs);
+  }
+  const deg = view3d ? 8 : 0;
+  trayEl.style.transform = `rotateX(${(-S.tilt.y * deg).toFixed(2)}deg) rotateY(${(S.tilt.x * deg).toFixed(2)}deg)`;
+  drawBoard(core, f, now);
+  drawLevel(core);
+}
+
+// Boot: show a live board behind the title card.
+fitCanvas();
+core = createCore(1);
+updateHud();
+titleScreen();
+requestAnimationFrame((t) => { lastT = t; frame(t); });
+
+// Hooks for automated tests; not used by the game itself.
+window.TEETER = { CONFIG, DIRS, OPP, createCore, get core() { return core; }, get paused() { return paused; }, get started() { return started; } };
+</script>
+</body>
+</html>
