@@ -31,7 +31,9 @@ const FILE = 'file://' + path.resolve(__dirname, '..', 'Emberwood.html');
       E.startSeason(opts.season || 0);
       S.T.fill(opts.fill === undefined ? TREE : opts.fill); S.burn.fill(0);
       S.trees0 = N; S.burned = 0; S.fireIdx = []; S.fireCount = 0;
-      S.schedule = []; S.strikes = []; S.fruits = []; S.fruitQ = []; S.dew = null; S.dewAt = -1;
+      // a storm far in the future keeps the season from ending under the test
+      S.schedule = [{ warnAt: 1e9, landAt: 1e9, count: 1, started: false, done: false }];
+      S.strikes = []; S.fruits = []; S.fruitQ = []; S.dew = null; S.dewAt = -1;
       S.windStr = opts.wind || 0; S.wind = opts.windDir || 0; S.windShiftAt = -1; S.windNext = -1;
       S.cfg = Object.assign({}, S.cfg, { target: 0, spot: 0, shift: 0 }, opts.cfg || {});
       const y = opts.y === undefined ? 2 : opts.y;
@@ -182,6 +184,42 @@ const FILE = 'file://' + path.resolve(__dirname, '..', 'Emberwood.html');
       return S.fruits.length === 1 && S.T[idx(S.fruits[0].x, S.fruits[0].y)] === TREE || 'fruits ' + S.fruits.length;
     });
 
+    test('embers jump a one-cell break in a gale, but a two-cell break always holds', () => {
+      let jumped1 = 0;
+      for (let trial = 0; trial < 20; trial++) {
+        for (const width of [1, 2]) {
+          blank({ wind: 0.85, windDir: [0, 1, 7][trial % 3], seed: 500 + trial, cfg: { spread: 0.09, spot: 0.05 } });
+          S.snake = [{ x: 0, y: 27 }];
+          for (let w = 0; w < width; w++) for (let y = 0; y < ROWS; y++) S.T[idx(20 + w, y)] = GROUND;
+          for (let y = 0; y < ROWS; y++) { S.T[idx(5, y)] = FIRE; S.burn[idx(5, y)] = 12; }
+          S.fireIdx = []; for (let c = 0; c < N; c++) if (S.T[c] === FIRE) S.fireIdx.push(c);
+          fireSteps(500);
+          let crossed = false;
+          for (let y = 0; y < ROWS; y++) for (let x = 20 + width; x < COLS; x++) if (S.T[idx(x, y)] === FIRE || S.T[idx(x, y)] === ASH) crossed = true;
+          if (width === 2 && crossed) return 'a two-wide break was crossed (trial ' + trial + ')';
+          if (width === 1 && crossed) jumped1++;
+        }
+      }
+      return jumped1 > 0 || 'embers never jumped a one-wide break, so the HUD warning would be a lie';
+    });
+    test('a tree that caught fire a moment ago is stamped out by the head, not fatal', () => {
+      blank({ fill: GROUND });
+      S.T[idx(11, 2)] = TREE; S.st = 100;
+      E.fireStep;  // (no-op reference)
+      S.T[idx(11, 2)] = FIRE; S.burn[idx(11, 2)] = 12; S.ignAt[idx(11, 2)] = S.st; S.fireIdx = [idx(11, 2)]; S.fireCount = 1;
+      moveOnce();
+      if (S.mode !== 'play') return 'died: ' + S.deathReason;
+      if (S.T[idx(11, 2)] !== GROUND || S.fireCount !== 0) return 'fire not stamped out';
+      blank({ fill: GROUND }); S.st = 100;
+      S.T[idx(11, 2)] = FIRE; S.burn[idx(11, 2)] = 12; S.ignAt[idx(11, 2)] = 50; S.fireIdx = [idx(11, 2)]; S.fireCount = 1;
+      moveOnce();
+      return S.mode === 'dying' && S.deathReason === 'fire' || 'an old fire did not kill: ' + S.mode;
+    });
+    test('clearing trees costs half a tree of forest each', () => {
+      blank(); S.trees0 = 1000;
+      for (let k = 0; k < 10; k++) moveOnce();
+      return Math.abs(E.savedPct() - (100 - 100 * (S.carved * 0.5) / 1000)) < 1e-9 && S.carved >= 9 || 'saved ' + E.savedPct() + ' carved ' + S.carved;
+    });
     // ---------------------------------------------------------------- strikes, dew
     test('a strike on a tree starts a fire; a strike on cleared ground is grounded for points', () => {
       blank({ fill: TREE });
@@ -202,6 +240,14 @@ const FILE = 'file://' + path.resolve(__dirname, '..', 'Emberwood.html');
         const g = S.schedule[0]; S.st = g.warnAt - 1; E.step();
         const h = S.snake[0];
         for (const s of S.strikes) if (Math.abs(s.x - h.x) + Math.abs(s.y - h.y) < 12) return 'strike ' + (Math.abs(s.x - h.x) + Math.abs(s.y - h.y)) + ' cells from the head';
+      }
+    });
+    test('strike marks never land on fruit or dew', () => {
+      for (let trial = 0; trial < 300; trial++) {
+        E.setSeed(trial); E.startSeason(9); E.setMode('play');
+        S.fruits = []; for (let k = 0; k < 60; k++) S.fruits.push({ x: (k * 7) % COLS, y: (k * 3) % ROWS, ph: 0 });
+        const g = S.schedule[0]; S.st = g.warnAt - 1; E.step();
+        for (const st of S.strikes) if (S.fruits.some(f => f.x === st.x && f.y === st.y)) return 'strike on fruit';
       }
     });
     test('dew puts out fire around the snake', () => {
@@ -337,6 +383,24 @@ const FILE = 'file://' + path.resolve(__dirname, '..', 'Emberwood.html');
   kb.push(['Enter then moves on to season 2', await page.evaluate(() => __ew.S.mode === 'ready' && __ew.S.season === 1)]);
   await page.keyboard.press('KeyM');
   kb.push(['M toggles sound without breaking anything', await page.evaluate(() => __ew.S.mode) === 'ready']);
+  const prevented = await page.evaluate(() => {
+    const r = {};
+    for (const [key, meta] of [['s', true], ['a', true], ['ArrowLeft', true], ['d', false]]) {
+      const ev = new KeyboardEvent('keydown', { key, metaKey: meta, bubbles: true, cancelable: true });
+      window.dispatchEvent(ev); r[key + (meta ? '+cmd' : '')] = ev.defaultPrevented;
+    }
+    return r;
+  });
+  kb.push(['Cmd shortcuts are left to the browser; plain game keys are captured', !prevented['s+cmd'] && !prevented['a+cmd'] && !prevented['ArrowLeft+cmd'] && prevented['d']]);
+  const rep = await page.evaluate(() => {
+    __ew.setMode('play'); __ew.S.pausedFrom = 'play';
+    const send = (key, repeat) => window.dispatchEvent(new KeyboardEvent('keydown', { key, repeat, bubbles: true, cancelable: true }));
+    send(' ', false); const a = __ew.S.mode; send(' ', true); send(' ', true); const b = __ew.S.mode;
+    return [a, b];
+  });
+  kb.push(['holding Space pauses once instead of flickering', rep[0] === 'paused' && rep[1] === 'paused']);
+  const disp = await page.evaluate(() => { const S = __ew.S; __ew.setMode('play'); S.cfg = Object.assign({}, S.cfg, { target: 74 }); S.trees0 = 10000; S.carved = 0; S.burned = 2646; return [__ew.savedPct(), Math.floor(__ew.savedPct())]; });
+  kb.push(['at 73.54% the HUD shows 73, not a passing 74', disp[1] === 73]);
   for (const [name, ok] of kb) { console.log((ok ? 'PASS ' : 'FAIL ') + name); if (!ok) failed++; }
 
   if (errors.length) { console.log('FAIL page errors:\n  ' + errors.join('\n  ')); failed++; }

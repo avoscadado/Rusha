@@ -34,6 +34,8 @@ const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 const WIND = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]
   .map(v => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; });
 const START_LEN = 4, FRUIT_GROW = 2, MIN_STRIKE_DIST = 12, DEW_RADIUS = 6;
+const CARVE_COST = 0.5;   // a tree you clear costs half as much forest as a tree that burns
+const STOMP_STEPS = 8;    // a tree that caught fire this recently (200 ms) can be stomped out by the head, not fatal
 const sec = s => Math.round(s * 1000 / STEP);
 
 // ---------------------------------------------------------------- random
@@ -57,34 +59,34 @@ const ri = n => Math.floor(rand() * n);
 const LEVELS = [
   { name: 'First Spark', blurb: 'A calm day. Three strikes. Learn how fire moves.',
     seed: 101, meadows: 6, lakes: 1, rocks: 4, river: 0, strikes: 3, pairs: 0, window: 40, warn: 3.0,
-    wind: 0.15, shift: 0, spread: 0.052, burn: 12, burst: 0.3, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 74 },
+    wind: 0.15, shift: 0, spread: 0.052, burn: 12, burst: 0.3, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 72 },
   { name: 'Kindling', blurb: 'A light breeze. Fire runs faster downwind.',
     seed: 202, meadows: 5, lakes: 2, rocks: 4, river: 0, strikes: 4, pairs: 0, window: 48, warn: 2.8,
-    wind: 0.3, shift: 0, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 70 },
+    wind: 0.3, shift: 0, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 67 },
   { name: 'The River', blurb: 'Water stops fire, and it stops you. Cross at the fords. The wind will turn.',
     seed: 303, meadows: 4, lakes: 0, rocks: 3, river: 1, strikes: 5, pairs: 0, window: 54, warn: 2.6,
-    wind: 0.32, shift: 24, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 1, target: 66 },
+    wind: 0.32, shift: 24, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 1, target: 64 },
   { name: 'Gusts', blurb: 'Strong wind carries embers over thin firebreaks. Cut wider downwind.',
     seed: 404, meadows: 4, lakes: 1, rocks: 4, river: 0, strikes: 6, pairs: 0, window: 58, warn: 2.5,
-    wind: 0.55, shift: 18, spread: 0.05, burn: 12, burst: 0.4, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 64 },
+    wind: 0.55, shift: 18, spread: 0.05, burn: 12, burst: 0.4, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 65 },
   { name: 'Twin Bolts', blurb: 'Lightning now strikes in pairs. Choose which fire to fight first.',
     seed: 505, meadows: 4, lakes: 2, rocks: 5, river: 2, strikes: 8, pairs: 1, window: 60, warn: 2.4,
-    wind: 0.4, shift: 22, spread: 0.052, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 60 },
+    wind: 0.4, shift: 22, spread: 0.052, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 55 },
   { name: 'Old Growth', blurb: 'Deep forest with no meadows to slow the fire.',
     seed: 606, meadows: 0, lakes: 1, rocks: 7, river: 0, strikes: 7, pairs: 0, window: 64, warn: 2.3,
-    wind: 0.4, shift: 20, spread: 0.05, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 4, dew: 1, target: 56 },
+    wind: 0.4, shift: 20, spread: 0.05, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 4, dew: 1, target: 59 },
   { name: 'Dry Season', blurb: 'Everything is tinder. Warnings come later.',
     seed: 707, meadows: 3, lakes: 0, rocks: 3, river: 1, strikes: 8, pairs: 1, window: 64, warn: 2.1,
-    wind: 0.45, shift: 18, spread: 0.056, burn: 12, burst: 0.55, spot: 0.002, road: 4, brush: 6, fruit: 4, dew: 1, target: 46 },
+    wind: 0.45, shift: 18, spread: 0.048, burn: 12, burst: 0.55, spot: 0.002, road: 4, brush: 6, fruit: 4, dew: 1, target: 55 },
   { name: 'Squall', blurb: 'A gale that keeps changing its mind.',
     seed: 808, meadows: 4, lakes: 2, rocks: 4, river: 0, strikes: 8, pairs: 0, window: 68, warn: 2.0,
-    wind: 0.7, shift: 13, spread: 0.056, burn: 12, burst: 0.5, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 46 },
+    wind: 0.7, shift: 13, spread: 0.048, burn: 12, burst: 0.5, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 54 },
   { name: 'Tinderbox', blurb: 'More strikes than you can reach. Save what you can.',
     seed: 909, meadows: 3, lakes: 1, rocks: 5, river: 2, strikes: 10, pairs: 1, window: 70, warn: 1.9,
-    wind: 0.5, shift: 16, spread: 0.058, burn: 12, burst: 0.6, spot: 0.0025, road: 4, brush: 6, fruit: 4, dew: 1, target: 40 },
+    wind: 0.5, shift: 16, spread: 0.048, burn: 12, burst: 0.6, spot: 0.0025, road: 4, brush: 6, fruit: 4, dew: 1, target: 49 },
   { name: 'Crown Fire', blurb: 'The last storm of the year.',
     seed: 1010, meadows: 2, lakes: 1, rocks: 5, river: 1, strikes: 12, pairs: 1, window: 75, warn: 1.8,
-    wind: 0.6, shift: 15, spread: 0.06, burn: 12, burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 32 },
+    wind: 0.6, shift: 15, spread: 0.05, burn: 12, burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 43 },
 ];
 
 function cfgFor(i) {
@@ -93,8 +95,8 @@ function cfgFor(i) {
   return Object.assign({}, b, {
     name: 'Endless ' + e + ': ' + b.name, blurb: 'The storms keep coming.',
     seed: b.seed * 31 + e * 7919, strikes: 12 + e, pairs: 1, window: 75, warn: Math.max(1.4, 1.8 - 0.05 * e),
-    wind: Math.min(0.85, 0.55 + 0.04 * e), shift: 14, spread: Math.min(0.075, 0.06 + 0.002 * e), burn: 12,
-    burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: Math.max(20, 34 - 2 * e),
+    wind: Math.min(0.85, 0.55 + 0.04 * e), shift: 14, spread: Math.min(0.06, 0.05 + 0.002 * e), burn: 12,
+    burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: Math.max(28, 42 - 2 * e),
   });
 }
 
@@ -114,7 +116,7 @@ const S = {
   fruits: [], fruitQ: [], dew: null, dewAt: -1,
   trees0: 1, burned: 0, carved: 0, fireIdx: [], fireCount: 0,
   eaten: 0, groundedN: 0, endT: 0, result: null, deathReason: '',
-  dirty: true, noSnake: false,
+  dirty: true, dirtyMark: new Uint8Array(N), dirtyList: [], ignAt: new Int32Array(N), noSnake: false, pausedFrom: 'play', bestAtStart: 0,
   demoAcc: 0, demoClock: 0, demoNext: 0,
   fx: { p: [], txt: [], bolts: [], flash: 0, shake: 0 },
 };
@@ -123,7 +125,7 @@ const S = {
 function generate(cfg) {
   const r = mulberry32(cfg.seed);
   const T = S.T;
-  T.fill(TREE); S.burn.fill(0);
+  T.fill(TREE); S.burn.fill(0); S.ignAt.fill(-100000);
   for (let i = 0; i < N; i++) S.V[i] = Math.floor(r() * 256);
   const inb = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS;
   const blob = (cx, cy, rad, type) => {
@@ -196,7 +198,7 @@ function generate(cfg) {
 function setMode(m) { S.mode = m; S.modeT = 0; }
 
 function startGame() {
-  S.score = 0; S.lives = 3; S.seasonsCleared = 0; S.endless = false;
+  S.score = 0; S.lives = 3; S.seasonsCleared = 0; S.endless = false; S.bestAtStart = S.best;
   startSeason(0);
   sfx('start');
 }
@@ -205,7 +207,7 @@ function startSeason(i) {
   S.season = i; S.cfg = cfgFor(i);
   generate(S.cfg);
   S.burned = 0; S.carved = 0; S.st = 0; S.acc = 0; S.eaten = 0; S.groundedN = 0; S.endT = 0;
-  S.result = null; S.lifeGained = false; S.seasonScore0 = S.score;
+  S.result = null; S.lifeGained = false;
   S.fireIdx = []; S.fireCount = 0;
   resetSnake();
   S.fruits = []; S.fruitQ = [];
@@ -242,9 +244,9 @@ function strikesLeft() { let n = 0; for (const g of S.schedule) if (!g.done) n +
 
 function endSeason(pass) {
   const saved = savedPct();
-  const res = { pass, saved, fruit: S.eaten, grounded: S.groundedN, length: S.snake.length, points: 0, lifeGained: false };
+  const res = { pass, saved, burned: S.burned, carved: S.carved, fruit: S.eaten, grounded: S.groundedN, length: S.snake.length, points: 0, lifeGained: false };
   if (pass) {
-    res.forestPts = Math.round(saved) * 10;
+    res.forestPts = Math.floor(saved) * 10;
     res.lengthPts = S.snake.length * 5;
     res.bonus = 250;
     res.points = res.forestPts + res.lengthPts + res.bonus;
@@ -315,14 +317,23 @@ function moveSnake() {
   const i = ny * COLS + nx, c = S.T[i];
   if (c === ROCK) return die('rock');
   if (c === WATER) return die('water');
-  if (c === FIRE) return die('fire');
+  let stomped = false;
+  if (c === FIRE) {
+    if (S.st - S.ignAt[i] > STOMP_STEPS) return die('fire');
+    stomped = true;     // it only just caught: too quick for anyone to react, so the head stamps it out
+  }
   const k = segAt(nx, ny);
   if (k >= 0 && !(k === S.snake.length - 1 && S.grow === 0)) return die('self');
   S.snake.unshift({ x: nx, y: ny });
   if (S.grow > 0) S.grow--; else S.snake.pop();
   let brush = false;
+  if (stomped) {
+    S.T[i] = GROUND; brush = true; touch(i);
+    S.fireIdx = S.fireIdx.filter(j => j !== i); S.fireCount = S.fireIdx.length;
+    text(nx + 0.5, ny - 0.2, 'Stamped out', '#ffc69a');
+  }
   if (c === TREE) {
-    S.T[i] = GROUND; S.carved++; brush = true; S.dirty = true;
+    S.T[i] = GROUND; S.carved++; brush = true; touch(i);
     for (let n = 0; n < 3; n++)
       particle({ x: nx + 0.5, y: ny + 0.5, vx: (rand() - 0.5) * 3, vy: (rand() - 0.5) * 3, life: 500, size: 0.12, col: rand() < 0.5 ? '#4f8a42' : '#6ea653', kind: 'leaf' });
     sfx('rustle');
@@ -340,7 +351,7 @@ function moveSnake() {
 }
 
 function ignite(j) {
-  S.T[j] = FIRE; S.burn[j] = S.cfg.burn + ri(5); S.burned++;
+  S.T[j] = FIRE; S.burn[j] = S.cfg.burn + ri(5); S.burned++; S.ignAt[j] = S.st; touch(j);
   const x = j % COLS, y = (j / COLS) | 0;
   const f = S.fruits.findIndex(o => o.x === x && o.y === y);
   if (f >= 0) { S.fruits.splice(f, 1); S.fruitQ.push(S.st + sec(3 + rand() * 3)); }
@@ -362,16 +373,16 @@ function fireStep() {
       if (rand() < cfg.spread * f) ign.push(j);
     }
     if (cfg.spot > 0 && ws > 0.2 && rand() < cfg.spot) {
-      const d = 2 + ri(2), tx = Math.round(x + w[0] * d), ty = Math.round(y + w[1] * d);
+      const tx = Math.round(x + w[0] * 2), ty = Math.round(y + w[1] * 2);
       if (tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS && T[ty * COLS + tx] === TREE) {
         ign.push(ty * COLS + tx);
         for (let n = 0; n < 4; n++) particle({ x: x + 0.5, y: y + 0.5, vx: (tx - x) * (1.2 + rand() * 0.5), vy: (ty - y) * (1.2 + rand() * 0.5) - 0.5, life: 700, size: 0.09, col: '#ffb347', kind: 'spark' });
       }
     }
-    if (--B[i] <= 0) T[i] = ASH; else list.push(i);
+    if (--B[i] <= 0) { T[i] = ASH; touch(i); } else list.push(i);
   }
   for (const j of ign) if (T[j] === TREE) { ignite(j); list.push(j); }
-  S.fireIdx = list; S.fireCount = list.length; S.dirty = true;
+  S.fireIdx = list; S.fireCount = list.length;
 }
 
 function pickTarget() {
@@ -383,6 +394,7 @@ function pickTarget() {
     if (S.T[i] !== TREE) continue;
     if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < MIN_STRIKE_DIST) continue;
     if (S.strikes.some(s => Math.abs(s.x - x) + Math.abs(s.y - y) < 6)) continue;
+    if (S.fruits.some(f => f.x === x && f.y === y) || (S.dew && S.dew.x === x && S.dew.y === y)) continue;
     let sc = rand() * 3;
     for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
       const xx = x + dx, yy = y + dy;
@@ -424,7 +436,6 @@ function land(s) {
     text(s.x + 0.5, s.y - 0.3, 'Grounded +30', '#bfe6ff');
     sfx('ground');
   }
-  S.dirty = true;
 }
 
 function windUpdate() {
@@ -449,6 +460,7 @@ function spawnFruit() {
     if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < 6) continue;
     if (S.fruits.some(f => f.x === x && f.y === y)) continue;
     if (S.dew && S.dew.x === x && S.dew.y === y) continue;
+    if (S.strikes.some(s => s.x === x && s.y === y)) continue;
     S.fruits.push({ x, y, ph: rand() * 6.28 });
     return true;
   }
@@ -470,6 +482,7 @@ function dewUpdate() {
       if (S.T[y * COLS + x] !== TREE) continue;
       if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < 8) continue;
       if (S.fruits.some(f => f.x === x && f.y === y)) continue;
+      if (S.strikes.some(s => s.x === x && s.y === y)) continue;
       S.dew = { x, y, until: S.st + sec(20) };
       sfx('dew');
       break;
@@ -485,7 +498,7 @@ function douse(cx, cy) {
     if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
     if (Math.hypot(x - cx, y - cy) > DEW_RADIUS + 0.3) continue;
     const i = y * COLS + x;
-    if (S.T[i] === FIRE) { S.T[i] = ASH; n++; }
+    if (S.T[i] === FIRE) { S.T[i] = ASH; touch(i); n++; }
   }
   S.fireIdx = S.fireIdx.filter(i => S.T[i] === FIRE); S.fireCount = S.fireIdx.length;
   S.score += 40;
@@ -494,11 +507,10 @@ function douse(cx, cy) {
     const a = rand() * 6.28, rr = rand() * DEW_RADIUS;
     particle({ x: cx + 0.5 + Math.cos(a) * rr, y: cy + 0.5 + Math.sin(a) * rr - 1.5, vx: 0.4, vy: 7 + rand() * 4, life: 380 + rand() * 300, size: 0.06, col: '#bfe3ff', kind: 'rain' });
   }
-  S.dirty = true;
   sfx('rain');
 }
 
-function savedPct() { return 100 * (1 - S.burned / Math.max(1, S.trees0)); }
+function savedPct() { return 100 * (1 - (S.burned + CARVE_COST * S.carved) / Math.max(1, S.trees0)); }
 
 function checkEnd() {
   if (S.mode !== 'play') return;
@@ -605,7 +617,7 @@ function ensureAudio() {
     if (!AC) {
       const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
       AC = new C(); master = AC.createGain(); master.gain.value = muted ? 0 : 0.55; master.connect(AC.destination);
-      noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate * 4, AC.sampleRate);
       const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     }
     if (AC.state === 'suspended') AC.resume();
@@ -631,7 +643,7 @@ function noise(dur, o) {
   const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.vol || 0.2, t + (o.attack || 0.005));
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   src.connect(fl); fl.connect(g); g.connect(master);
-  src.start(t, Math.random() * 1.5); src.stop(t + dur + 0.05);
+  src.start(t, Math.random() * Math.max(0, 3.8 - dur * (o.rate || 1))); src.stop(t + dur + 0.05);
 }
 function sfx(name) {
   if (!AC || muted) return;
@@ -655,10 +667,12 @@ function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 
 
 // ---------------------------------------------------------------- input
 const KEYDIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', W: 'up', s: 'down', S: 'down', a: 'left', A: 'left', d: 'right', D: 'right' };
+const CODEDIR = { KeyW: 'up', KeyS: 'down', KeyA: 'left', KeyD: 'right' };
 function onKey(e) {
-  const k = e.key, d = KEYDIR[k];
+  if (e.metaKey || e.ctrlKey || e.altKey) return;      // leave browser shortcuts alone
+  const k = e.key, d = KEYDIR[k] || CODEDIR[e.code];
   if (d || k === ' ' || k.startsWith('Arrow')) e.preventDefault();
-  if (e.metaKey || e.ctrlKey) return;
+  if (e.repeat && !d) return;                           // holding Space or Enter must not flicker screens
   ensureAudio();
   if (k === 'm' || k === 'M') { toggleMute(); return; }
   switch (S.mode) {
@@ -701,25 +715,26 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) autoP
 // ---------------------------------------------------------------- rendering
 const cv = document.getElementById('c'), ctx = cv.getContext('2d');
 const terr = document.createElement('canvas'), tctx = terr.getContext('2d');
-const glow = document.createElement('canvas');
-let VW = 0, VH = 0, DPR = 1, CELL = 20, OX = 0, OY = 0, BW = 0, BH = 0;
-const HUD = 66;
+// fire glow is drawn as one tiny image (one pixel per cell) scaled up smoothly: cheap however big the fire
+const glowC = document.createElement('canvas'); glowC.width = COLS; glowC.height = ROWS;
+const gctx = glowC.getContext('2d'), glowImg = gctx.createImageData(COLS, ROWS);
+let VW = 0, VH = 0, DPR = 1, CELL = 20, OX = 0, OY = 0, BW = 0, BH = 0, HS = 1, HUD = 66;
 const UI = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif';
 const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif';
 
 function resize() {
-  DPR = Math.min(2, window.devicePixelRatio || 1);
   VW = window.innerWidth; VH = window.innerHeight;
+  HS = Math.max(0.9, Math.min(1.8, Math.min(VW / 1440, VH / 900)));
+  HUD = Math.round(66 * HS);
+  CELL = Math.max(8, Math.floor(Math.min((VW - 24) / COLS, (VH - HUD - 14) / ROWS)));
+  // cap the backing store on very large screens, and keep cells on whole device pixels
+  let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1, Math.sqrt(6e6 / Math.max(1, VW * VH))));
+  DPR = Math.max(1, Math.floor(CELL * dpr) / CELL);
   cv.width = Math.floor(VW * DPR); cv.height = Math.floor(VH * DPR);
   cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
-  CELL = Math.max(8, Math.floor(Math.min((VW - 24) / COLS, (VH - HUD - 14) / ROWS)));
   BW = CELL * COLS; BH = CELL * ROWS;
   OX = Math.floor((VW - BW) / 2); OY = HUD + Math.max(0, Math.floor((VH - HUD - BH - 6) / 2));
-  terr.width = Math.floor(BW * DPR); terr.height = Math.floor(BH * DPR);
-  glow.width = glow.height = 64;
-  const g = glow.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  gr.addColorStop(0, 'rgba(255,150,50,0.85)'); gr.addColorStop(0.4, 'rgba(255,90,20,0.35)'); gr.addColorStop(1, 'rgba(255,60,0,0)');
-  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  terr.width = Math.round(BW * DPR); terr.height = Math.round(BH * DPR);
   S.dirty = true;
 }
 window.addEventListener('resize', resize);
@@ -727,58 +742,81 @@ window.addEventListener('resize', resize);
 const CANOPY = ['#2f5a2a', '#356530', '#2b5226', '#3b6b34', '#2a4d2a', '#31602c'];
 const CANOPY_HI = ['#4a8040', '#55904a', '#47783d', '#5c9a4f', '#447038', '#4f8644'];
 
+function cellBase(g, x, y) {
+  const c = CELL, i = y * COLS + x, t = S.T[i], v = S.V[i], px = x * c, py = y * c;
+  switch (t) {
+    case TREE: g.fillStyle = '#22331b'; g.fillRect(px, py, c, c); break;
+    case GROUND:
+      g.fillStyle = (v & 1) ? '#6b5236' : '#664e33'; g.fillRect(px, py, c, c);
+      g.fillStyle = '#58432b'; g.fillRect(px + (v % 7) / 8 * c, py + ((v >> 3) % 7) / 8 * c, c * 0.12, c * 0.12);
+      break;
+    case MEADOW:
+      g.fillStyle = (v & 1) ? '#5f7232' : '#5a6c30'; g.fillRect(px, py, c, c);
+      g.fillStyle = '#738a3e';
+      g.fillRect(px + (v % 5) / 6 * c, py + ((v >> 2) % 5) / 6 * c, c * 0.08, c * 0.22);
+      g.fillRect(px + ((v >> 4) % 5) / 6 * c, py + ((v >> 1) % 5) / 6 * c, c * 0.08, c * 0.18);
+      break;
+    case ASH:
+      g.fillStyle = (v & 1) ? '#2d2927' : '#2a2624'; g.fillRect(px, py, c, c);
+      g.fillStyle = '#47413c'; g.fillRect(px + (v % 6) / 7 * c, py + ((v >> 3) % 6) / 7 * c, c * 0.1, c * 0.1);
+      g.fillStyle = '#3b3430'; g.fillRect(px + ((v >> 2) % 6) / 7 * c, py + ((v >> 5) % 6) / 7 * c, c * 0.14, c * 0.08);
+      break;
+    case FIRE:
+      g.fillStyle = '#3d1a0e'; g.fillRect(px, py, c, c); break;
+    case WATER:
+      g.fillStyle = '#1f4d6c'; g.fillRect(px, py, c, c);
+      g.fillStyle = '#2e6a90'; g.fillRect(px + c * 0.15 + (v % 4) * c * 0.1, py + c * (0.3 + ((v >> 2) % 4) * 0.12), c * 0.4, Math.max(1, c * 0.06));
+      break;
+    case ROCK:
+      g.fillStyle = '#3f3d38'; g.fillRect(px, py, c, c);
+      g.fillStyle = '#2b2a27'; rrect(g, px + c * 0.1, py + c * 0.16, c * 0.86, c * 0.8, c * 0.28); g.fill();
+      g.fillStyle = (v & 1) ? '#7a7b7e' : '#717275'; rrect(g, px + c * 0.06, py + c * 0.06, c * 0.86, c * 0.8, c * 0.28); g.fill();
+      g.fillStyle = '#9c9ea2'; rrect(g, px + c * 0.18, py + c * 0.14, c * 0.38, c * 0.2, c * 0.1); g.fill();
+      break;
+  }
+}
+function canopy(g, x, y) {
+  const c = CELL, v = S.V[y * COLS + x], cx = x * c + c / 2, cy = y * c + c / 2, r = c * (0.5 + (v % 4) * 0.025);
+  g.fillStyle = 'rgba(8,14,6,0.45)'; g.beginPath(); g.arc(cx + c * 0.08, cy + c * 0.13, r, 0, 6.283); g.fill();
+  g.fillStyle = CANOPY[v % CANOPY.length]; g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.fill();
+  g.fillStyle = CANOPY_HI[(v >> 3) % CANOPY_HI.length];
+  g.beginPath(); g.arc(cx - c * 0.14, cy - c * 0.16, r * 0.42, 0, 6.283); g.fill();
+}
+// full repaint: after a new map or a resize
 function drawTerrain() {
-  const c = CELL, T = S.T, V = S.V, g = tctx;
+  const g = tctx;
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
-  g.fillStyle = '#22331b'; g.fillRect(0, 0, BW, BH);
-  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
-    const i = y * COLS + x, t = T[i], v = V[i], px = x * c, py = y * c;
-    switch (t) {
-      case TREE: g.fillStyle = '#22331b'; g.fillRect(px, py, c, c); break;
-      case GROUND:
-        g.fillStyle = (v & 1) ? '#6b5236' : '#664e33'; g.fillRect(px, py, c, c);
-        g.fillStyle = '#58432b'; g.fillRect(px + (v % 7) / 8 * c, py + ((v >> 3) % 7) / 8 * c, c * 0.12, c * 0.12);
-        break;
-      case MEADOW:
-        g.fillStyle = (v & 1) ? '#5f7232' : '#5a6c30'; g.fillRect(px, py, c, c);
-        g.fillStyle = '#738a3e';
-        g.fillRect(px + (v % 5) / 6 * c, py + ((v >> 2) % 5) / 6 * c, c * 0.08, c * 0.22);
-        g.fillRect(px + ((v >> 4) % 5) / 6 * c, py + ((v >> 1) % 5) / 6 * c, c * 0.08, c * 0.18);
-        break;
-      case ASH:
-        g.fillStyle = (v & 1) ? '#2d2927' : '#2a2624'; g.fillRect(px, py, c, c);
-        g.fillStyle = '#47413c'; g.fillRect(px + (v % 6) / 7 * c, py + ((v >> 3) % 6) / 7 * c, c * 0.1, c * 0.1);
-        g.fillStyle = '#3b3430'; g.fillRect(px + ((v >> 2) % 6) / 7 * c, py + ((v >> 5) % 6) / 7 * c, c * 0.14, c * 0.08);
-        break;
-      case FIRE:
-        g.fillStyle = '#3d1a0e'; g.fillRect(px, py, c, c); break;
-      case WATER:
-        g.fillStyle = '#1f4d6c'; g.fillRect(px, py, c, c);
-        g.fillStyle = '#2e6a90'; g.fillRect(px + c * 0.15 + (v % 4) * c * 0.1, py + c * (0.3 + ((v >> 2) % 4) * 0.12), c * 0.4, Math.max(1, c * 0.06));
-        break;
-      case ROCK:
-        g.fillStyle = '#3f3d38'; g.fillRect(px, py, c, c);
-        break;
-    }
-  }
-  // rocks as boulders
-  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
-    const i = y * COLS + x; if (T[i] !== ROCK) continue;
-    const v = V[i], px = x * c, py = y * c;
-    g.fillStyle = '#2b2a27'; rrect(g, px + c * 0.1, py + c * 0.16, c * 0.86, c * 0.8, c * 0.28); g.fill();
-    g.fillStyle = (v & 1) ? '#7a7b7e' : '#717275'; rrect(g, px + c * 0.06, py + c * 0.06, c * 0.86, c * 0.8, c * 0.28); g.fill();
-    g.fillStyle = '#9c9ea2'; rrect(g, px + c * 0.18, py + c * 0.14, c * 0.38, c * 0.2, c * 0.1); g.fill();
-  }
-  // canopies, back to front so lower rows overlap upper
-  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
-    const i = y * COLS + x; if (T[i] !== TREE) continue;
-    const v = V[i], cx = x * c + c / 2, cy = y * c + c / 2, r = c * (0.5 + (v % 4) * 0.025);
-    g.fillStyle = 'rgba(8,14,6,0.45)'; g.beginPath(); g.arc(cx + c * 0.08, cy + c * 0.13, r, 0, 6.283); g.fill();
-    g.fillStyle = CANOPY[v % CANOPY.length]; g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.fill();
-    g.fillStyle = CANOPY_HI[(v >> 3) % CANOPY_HI.length];
-    g.beginPath(); g.arc(cx - c * 0.14, cy - c * 0.16, r * 0.42, 0, 6.283); g.fill();
-  }
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) cellBase(g, x, y);
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) if (S.T[y * COLS + x] === TREE) canopy(g, x, y);
   S.dirty = false;
+  for (const i of S.dirtyList) S.dirtyMark[i] = 0;
+  S.dirtyList.length = 0;
+}
+// partial repaint: only the cells that changed (and their neighbours, since canopies overlap)
+function patchTerrain() {
+  const g = tctx, c = CELL;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  for (const i of S.dirtyList) {
+    S.dirtyMark[i] = 0;
+    const x = i % COLS, y = (i / COLS) | 0;
+    g.save(); g.beginPath(); g.rect(x * c, y * c, c, c); g.clip();
+    cellBase(g, x, y);
+    for (let yy = y - 1; yy <= y + 1; yy++) for (let xx = x - 1; xx <= x + 1; xx++)
+      if (xx >= 0 && yy >= 0 && xx < COLS && yy < ROWS && S.T[yy * COLS + xx] === TREE) canopy(g, xx, yy);
+    g.restore();
+  }
+  S.dirtyList.length = 0;
+}
+function touch(i) {
+  if (S.dirty) return;
+  const x = i % COLS, y = (i / COLS) | 0;
+  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    const xx = x + dx, yy = y + dy;
+    if (xx < 0 || yy < 0 || xx >= COLS || yy >= ROWS) continue;
+    const j = yy * COLS + xx;
+    if (!S.dirtyMark[j]) { S.dirtyMark[j] = 1; S.dirtyList.push(j); }
+  }
+  if (S.dirtyList.length > 500) S.dirty = true;
 }
 
 function rrect(g, x, y, w, h, r) {
@@ -788,40 +826,47 @@ function rrect(g, x, y, w, h, r) {
   g.quadraticCurveTo(x, y + h, x, y + h - r); g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
 }
 
+// flames are batched: one path and one fill per colour, however many cells burn
+const FLAME_LAYERS = [['#d8401c', -0.16, 0.75, 0.8, 1], ['#e2521f', 0.14, 0.8, 0.8, 1], ['#ff8a22', 0, 1, 1, 1], ['#ffd65a', 0, 0.55, 0.5, 0.6]];
 function drawFire(now) {
-  const c = CELL, T = S.T;
-  const list = S.fireIdx;
-  // flames
+  const c = CELL, T = S.T, list = S.fireIdx;
+  if (!list.length) return;
+  const windSway = WIND[S.wind][0] * S.windStr * c * 0.25, maxB = Math.max(1, S.cfg.burn);
+  for (const [col, dxk, hk, wk, sk] of FLAME_LAYERS) {
+    ctx.fillStyle = col; ctx.beginPath();
+    for (const i of list) {
+      if (T[i] !== FIRE) continue;
+      const x = i % COLS, y = (i / COLS) | 0, v = S.V[i];
+      const frac = Math.min(1, S.burn[i] / maxB), fl = 0.75 + 0.25 * Math.sin(now * 0.013 + v);
+      const cx = OX + x * c + c / 2 + dxk * c, by = OY + y * c + c * 0.85;
+      const h = c * (0.55 + 0.6 * frac) * fl * hk, w = c * (0.26 + 0.12 * frac) * wk;
+      const sway = (Math.sin(now * 0.009 + v * 0.7) * c * 0.12 + windSway) * sk;
+      ctx.moveTo(cx - w, by);
+      ctx.quadraticCurveTo(cx - w * 1.1, by - h * 0.55, cx + sway, by - h);
+      ctx.quadraticCurveTo(cx + w * 1.1, by - h * 0.55, cx + w, by);
+      ctx.quadraticCurveTo(cx, by + w * 0.6, cx - w, by);
+    }
+    ctx.fill();
+  }
+  // glow: one pixel per burning cell, scaled up smoothly over just the burning region
+  const d = glowImg.data; d.fill(0);
+  let x0 = COLS, y0 = ROWS, x1 = -1, y1 = -1;
   for (const i of list) {
     if (T[i] !== FIRE) continue;
-    const x = i % COLS, y = (i / COLS) | 0, v = S.V[i];
-    const frac = Math.min(1, S.burn[i] / Math.max(1, S.cfg.burn));
-    const fl = 0.75 + 0.25 * Math.sin(now * 0.013 + v);
-    const cx = OX + x * c + c / 2, by = OY + y * c + c * 0.85;
-    const h = c * (0.55 + 0.6 * frac) * fl, w = c * (0.26 + 0.12 * frac);
-    const sway = Math.sin(now * 0.009 + v * 0.7) * c * 0.12 + WIND[S.wind][0] * S.windStr * c * 0.25;
-    flame(cx - c * 0.16, by, h * 0.75, w * 0.8, sway, '#d8401c');
-    flame(cx + c * 0.14, by, h * 0.8, w * 0.8, sway, '#e2521f');
-    flame(cx, by, h, w, sway, '#ff8a22');
-    flame(cx, by, h * 0.55, w * 0.5, sway * 0.6, '#ffd65a');
+    const o = i * 4, x = i % COLS, y = (i / COLS) | 0;
+    d[o] = 255; d[o + 1] = 120; d[o + 2] = 35; d[o + 3] = Math.round(150 + 100 * Math.min(1, S.burn[i] / maxB));
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
   }
-  // glow
-  ctx.save(); ctx.globalCompositeOperation = 'lighter';
-  for (const i of list) {
-    if (T[i] !== FIRE) continue;
-    const x = i % COLS, y = (i / COLS) | 0;
-    ctx.globalAlpha = 0.28 + 0.12 * Math.sin(now * 0.02 + S.V[i]);
-    ctx.drawImage(glow, OX + x * c + c / 2 - c * 1.4, OY + y * c + c / 2 - c * 1.4, c * 2.8, c * 2.8);
-  }
+  if (x1 < 0) return;
+  gctx.putImageData(glowImg, 0, 0);
+  // one cell of margin so the glow fades out past the edge of the fire
+  x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(COLS - 1, x1 + 1); y1 = Math.min(ROWS - 1, y1 + 1);
+  const sw = x1 - x0 + 1, sh = y1 - y0 + 1;
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.imageSmoothingEnabled = true;
+  if ('imageSmoothingQuality' in ctx) ctx.imageSmoothingQuality = 'low';
+  ctx.globalAlpha = 0.6 + 0.08 * Math.sin(now * 0.017);
+  ctx.drawImage(glowC, x0, y0, sw, sh, OX + x0 * c, OY + y0 * c, sw * c, sh * c);
   ctx.restore();
-}
-function flame(x, y, h, w, sway, col) {
-  ctx.fillStyle = col; ctx.beginPath();
-  ctx.moveTo(x - w, y);
-  ctx.quadraticCurveTo(x - w * 1.1, y - h * 0.55, x + sway, y - h);
-  ctx.quadraticCurveTo(x + w * 1.1, y - h * 0.55, x + w, y);
-  ctx.quadraticCurveTo(x, y + w * 0.6, x - w, y);
-  ctx.fill();
 }
 
 function drawSnake(now) {
@@ -965,69 +1010,72 @@ function drawWind() {
 
 // ----- HUD
 function drawHUD(now) {
-  ctx.fillStyle = '#101310'; ctx.fillRect(0, 0, VW, HUD - 6);
-  ctx.fillStyle = '#1c211a'; ctx.fillRect(0, HUD - 7, VW, 1);
-  const L = OX, R = OX + BW, y1 = 24, y2 = 46;
-  ctx.textBaseline = 'alphabetic';
-  // title and season
-  ctx.textAlign = 'left';
-  ctx.fillStyle = '#e9c98a'; ctx.font = '600 15px ' + SERIF; spaced('EMBERWOOD', L, y1, 2.5);
+  const H = HS, px = n => Math.round(n * H) + 'px ';
+  ctx.fillStyle = '#101310'; ctx.fillRect(0, 0, VW, HUD - 6 * H);
+  ctx.fillStyle = '#1c211a'; ctx.fillRect(0, HUD - 7 * H, VW, 1);
+  const L = OX, R = OX + BW, y1 = 24 * H, y2 = 46 * H;
+  const label = (t, x, y) => { ctx.fillStyle = '#8f9a83'; ctx.font = '600 ' + px(11) + UI; spaced(t, x, y, 1.5 * H); };
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+  ctx.fillStyle = '#e9c98a'; ctx.font = '600 ' + px(15) + SERIF; spaced('EMBERWOOD', L, y1, 2.5 * H);
   if (S.mode === 'title' || S.mode === 'howto') {
-    ctx.fillStyle = '#a9b39a'; ctx.font = '13px ' + UI; ctx.fillText('A snake game for a dry year', L, y2);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#8f9a83'; ctx.font = '12px ' + UI;
+    ctx.fillStyle = '#a9b39a'; ctx.font = px(13) + UI; ctx.fillText('A snake game for a dry year', L, y2);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#8f9a83'; ctx.font = px(12) + UI;
     ctx.fillText(muted ? 'sound off (M)' : 'sound on (M)', R, y1);
     if (S.best) ctx.fillText('best ' + S.best, R, y2);
     ctx.textAlign = 'left';
     return;
   }
-  ctx.fillStyle = '#a9b39a'; ctx.font = '13px ' + UI;
-  const sname = S.season < LEVELS.length ? 'Season ' + (S.season + 1) + ' of ' + LEVELS.length + ': ' + S.cfg.name : S.cfg.name;
-  ctx.fillText(sname, L, y2);
-  // forest bar
-  const fx0 = L + BW * 0.30, fw = BW * 0.22;
-  const saved = savedPct(), tgt = S.cfg.target;
+  ctx.fillStyle = '#a9b39a'; ctx.font = px(13) + UI;
+  ctx.fillText(S.season < LEVELS.length ? 'Season ' + (S.season + 1) + ' of ' + LEVELS.length + ': ' + S.cfg.name : S.cfg.name, L, y2);
+
+  // the right-hand blocks are laid out from the right edge, so they never collide
+  const livesX = R, scoreX = R - 92 * H, windX = R - 290 * H;
+  // forest
+  const fx0 = L + BW * 0.27, fw = Math.min(BW * 0.2, windX - 190 * H - fx0 - 24 * H);
+  const saved = savedPct(), shown = Math.max(0, Math.floor(saved)), tgt = S.cfg.target;
   const danger = saved - tgt < 6 && S.mode === 'play';
-  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('FOREST', fx0, y1 - 4, 1.5);
-  ctx.textAlign = 'right'; ctx.fillStyle = danger && Math.floor(now / 250) % 2 ? '#ff8a5a' : '#dfe8d2'; ctx.font = '700 14px ' + UI;
-  ctx.fillText(Math.max(0, saved).toFixed(0) + '%', fx0 + fw, y1 - 3);
+  label('FOREST', fx0, y1 - 4 * H);
+  ctx.textAlign = 'right'; ctx.fillStyle = danger && Math.floor(now / 250) % 2 ? '#ff8a5a' : '#dfe8d2'; ctx.font = '700 ' + px(14) + UI;
+  ctx.fillText(shown + '%', fx0 + fw, y1 - 3 * H);
   ctx.textAlign = 'left';
-  ctx.fillStyle = '#26301f'; rrect(ctx, fx0, y1 + 3, fw, 10, 5); ctx.fill();
+  ctx.fillStyle = '#26301f'; rrect(ctx, fx0, y1 + 3 * H, fw, 10 * H, 5 * H); ctx.fill();
   const fill = Math.max(0, Math.min(1, saved / 100));
-  ctx.fillStyle = danger ? '#d9733f' : '#5f9a45'; rrect(ctx, fx0, y1 + 3, Math.max(10, fw * fill), 10, 5); ctx.fill();
-  const tx = fx0 + fw * tgt / 100;
-  ctx.fillStyle = '#ffdd88'; ctx.fillRect(tx - 1, y1, 2, 16);
-  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI;
-  ctx.fillText('keep above ' + tgt + '%', fx0, y2 + 2);
+  ctx.fillStyle = danger ? '#d9733f' : '#5f9a45'; rrect(ctx, fx0, y1 + 3 * H, Math.max(10 * H, fw * fill), 10 * H, 5 * H); ctx.fill();
+  ctx.fillStyle = '#ffdd88'; ctx.fillRect(fx0 + fw * tgt / 100 - 1, y1, 2, 16 * H);
+  ctx.fillStyle = '#8f9a83'; ctx.font = px(11) + UI;
+  ctx.fillText('keep at least ' + tgt + '%', fx0, y2 + 2 * H);
   // storm
-  const sx0 = L + BW * 0.57;
-  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('STORM', sx0, y1 - 4, 1.5);
-  const left = strikesLeft();
-  const total = S.cfg.strikes;
-  const bw = Math.min(12, (BW * 0.13) / Math.max(1, total));
-  for (let k = 0; k < total; k++) boltIcon(sx0 + k * bw + 1, y1 + 1, bw * 0.62, k < left ? '#f3e7a0' : '#3a3f33');
-  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI;
+  const sx0 = fx0 + fw + 26 * H;
+  label('STORM', sx0, y1 - 4 * H);
+  const left = strikesLeft(), total = S.cfg.strikes;
+  const bw = Math.min(11 * H, (windX - sx0 - 20 * H) / Math.max(1, total));
+  for (let k = 0; k < total; k++) boltIcon(sx0 + k * bw + 1, y1 + 1 * H, bw * 0.62, k < left ? '#f3e7a0' : '#3a3f33');
+  ctx.fillStyle = '#8f9a83'; ctx.font = px(11) + UI;
   const fires = S.fireCount;
-  ctx.fillText(left ? left + ' strike' + (left === 1 ? '' : 's') + ' to come' : (fires ? 'storm passed, ' + fires + ' burning' : 'storm passed'), sx0, y2 + 2);
+  ctx.fillText(left ? left + ' strike' + (left === 1 ? '' : 's') + ' to come' : (fires ? 'passed, ' + fires + ' burning' : 'storm passed'), sx0, y2 + 2 * H);
   // wind
-  const wx0 = L + BW * 0.73, wcx = wx0 + 16, wcy = y1 + 8;
-  ctx.strokeStyle = '#3a4434'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(wcx, wcy, 15, 0, 6.283); ctx.stroke();
-  windArrow(wcx, wcy, S.wind, 12, '#e6eedc', 2.5);
-  if (S.windNext >= 0 && Math.floor(now / 200) % 2) windArrow(wcx, wcy, S.windNext, 12, '#ffb36a', 2);
-  ctx.textAlign = 'left'; ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('WIND', wx0 + 38, y1 - 4, 1.5);
-  ctx.fillStyle = S.windNext >= 0 ? '#ffb36a' : '#dfe8d2'; ctx.font = '12px ' + UI;
+  const wcx = windX + 16 * H, wcy = y1 + 8 * H;
+  ctx.strokeStyle = '#3a4434'; ctx.lineWidth = 1.5 * H; ctx.beginPath(); ctx.arc(wcx, wcy, 15 * H, 0, 6.283); ctx.stroke();
+  windArrow(wcx, wcy, S.wind, 12 * H, '#e6eedc', 2.5 * H);
+  if (S.windNext >= 0 && Math.floor(now / 200) % 2) windArrow(wcx, wcy, S.windNext, 12 * H, '#ffb36a', 2 * H);
+  label('WIND', windX + 38 * H, y1 - 4 * H);
+  ctx.textAlign = 'left'; ctx.font = px(12) + UI;
+  ctx.fillStyle = S.windNext >= 0 ? '#ffb36a' : '#dfe8d2';
   const wn = S.windStr < 0.25 ? 'light' : S.windStr < 0.45 ? 'breezy' : S.windStr < 0.65 ? 'strong' : 'gale';
-  ctx.fillText(S.windNext >= 0 ? 'turning' : wn, wx0 + 38, y1 + 13);
-  // score and lives
+  ctx.fillText(S.windNext >= 0 ? 'turning' : wn, windX + 38 * H, y1 + 13 * H);
+  if (S.cfg.spot > 0 && S.windStr > 0.2) { ctx.fillStyle = '#ff9d5c'; ctx.font = '600 ' + px(11) + UI; ctx.fillText('embers fly', windX + 38 * H, y2 + 2 * H); }
+  // score
   ctx.textAlign = 'right';
-  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; ctx.fillText('SCORE', R - 90, y1 - 4);
-  ctx.fillStyle = '#f2ead6'; ctx.font = '700 18px ' + UI; ctx.fillText(String(S.score), R - 90, y1 + 14);
-  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI; ctx.fillText('best ' + S.best, R - 90, y2 + 2);
-  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; ctx.fillText('LIVES', R, y1 - 4);
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 ' + px(11) + UI; ctx.fillText('SCORE', scoreX, y1 - 4 * H);
+  ctx.fillStyle = '#f2ead6'; ctx.font = '700 ' + px(18) + UI; ctx.fillText(String(S.score), scoreX, y1 + 14 * H);
+  ctx.fillStyle = '#8f9a83'; ctx.font = px(11) + UI; ctx.fillText('best ' + Math.max(S.best, S.score), scoreX, y2 + 2 * H);
+  // lives
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 ' + px(11) + UI; ctx.fillText('LIVES', livesX, y1 - 4 * H);
   for (let k = 0; k < 5; k++) {
     ctx.fillStyle = k < S.lives ? '#9ff3e4' : '#2a332a';
-    ctx.beginPath(); ctx.arc(R - 6 - k * 14, y1 + 9, 5, 0, 6.283); ctx.fill();
+    ctx.beginPath(); ctx.arc(livesX - 6 * H - k * 14 * H, y1 + 9 * H, 5 * H, 0, 6.283); ctx.fill();
   }
-  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI; ctx.fillText('length ' + S.snake.length, R, y2 + 2);
+  ctx.fillStyle = '#8f9a83'; ctx.font = px(11) + UI; ctx.fillText('length ' + S.snake.length, livesX, y2 + 2 * H);
   ctx.textAlign = 'left';
 }
 function spaced(s, x, y, sp) { for (const ch of s) { ctx.fillText(ch, x, y); x += ctx.measureText(ch).width + sp; } }
@@ -1042,9 +1090,10 @@ function windArrow(cx, cy, dirIdx, len, col, lw) {
   ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
   ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
   const a = Math.atan2(w[1], w[0]);
-  ctx.beginPath(); ctx.moveTo(x2 + Math.cos(a) * 3, y2 + Math.sin(a) * 3);
-  ctx.lineTo(x2 + Math.cos(a + 2.5) * 7, y2 + Math.sin(a + 2.5) * 7);
-  ctx.lineTo(x2 + Math.cos(a - 2.5) * 7, y2 + Math.sin(a - 2.5) * 7); ctx.closePath(); ctx.fill();
+  const hk = HS;
+  ctx.beginPath(); ctx.moveTo(x2 + Math.cos(a) * 3 * hk, y2 + Math.sin(a) * 3 * hk);
+  ctx.lineTo(x2 + Math.cos(a + 2.5) * 7 * hk, y2 + Math.sin(a + 2.5) * 7 * hk);
+  ctx.lineTo(x2 + Math.cos(a - 2.5) * 7 * hk, y2 + Math.sin(a - 2.5) * 7 * hk); ctx.closePath(); ctx.fill();
 }
 
 // ----- overlays
@@ -1075,13 +1124,13 @@ function drawOverlay(now) {
     centerText(S.best ? 'Best score ' + S.best : 'Ten seasons. Arrow keys or WASD.', P.cx, P.y + 296, '13px ' + UI, '#7f8a72');
   } else if (m === 'howto') {
     ctx.fillStyle = 'rgba(8,10,7,0.6)'; ctx.fillRect(OX, OY, BW, BH);
-    const P = panel(Math.min(680, BW - 30), Math.min(BH - 20, 470));
+    const P = panel(Math.min(680, BW - 30), Math.min(BH - 20, 490));
     centerText('How to play', P.cx, P.y + 46, '600 28px ' + SERIF, '#f0cf8c');
     const items = [
       'Steer with the arrow keys or WASD. Like any snake, you never stop moving.',
-      'Your head clears every tree it moves into, leaving bare ground. Pushing through trees is slower than travelling on open ground, so your old trails become roads.',
+      'Your head clears every tree it moves into, leaving bare ground. Pushing through trees is slow, and each tree you clear costs half as much forest as one that burns. Ride your old trails: they are roads.',
       'Lightning marks pulse before they strike. A strike sets the trees on fire. Reach a mark and clear it before it lands to ground the bolt.',
-      'Fire spreads from tree to tree, much faster downwind. It cannot cross bare ground, meadow, ash, rock or water. Strong wind throws embers over thin breaks.',
+      'Fire spreads from tree to tree, much faster downwind. It cannot cross bare ground, meadow, ash, rock or water. When the HUD says embers fly, they jump one-cell breaks: cut two wide downwind.',
       'Carve firebreaks around fires to contain them. A season ends when the storm has passed and the last flame is out. Keep the forest above the target or lose a life.',
       'Fruit makes you longer and scores points. A blue dew drop brings rain that puts out nearby fire. Running into fire, rock, water, the edge or yourself costs a life.',
     ];
@@ -1111,15 +1160,17 @@ function drawOverlay(now) {
     centerText(DEATH_TEXT[S.deathReason] || 'Ouch.', P.cx, P.y + 43, '600 17px ' + UI, '#ffb99a');
   } else if (m === 'tally') {
     const r = S.result;
-    const P = panel(Math.min(460, BW - 40), r.pass ? 330 : 230);
+    const P = panel(Math.min(460, BW - 40), r.pass ? 356 : 256);
     centerText(r.pass ? 'The wood still stands' : 'The forest fell', P.cx, P.y + 50, '600 28px ' + SERIF, r.pass ? '#f0cf8c' : '#ff9e7a');
     centerText(S.cfg.name, P.cx, P.y + 76, '14px ' + UI, '#8f9a83');
     const rows = r.pass ? [
-      ['Forest saved', r.saved.toFixed(0) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Forest saved', Math.floor(r.saved) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Trees burned / cleared', r.burned + ' / ' + r.carved],
       ['Forest points', '+' + r.forestPts], ['Length ' + r.length, '+' + r.lengthPts], ['Season bonus', '+' + r.bonus],
       ['Fruit eaten / bolts grounded', r.fruit + ' / ' + r.grounded],
     ] : [
-      ['Forest left', r.saved.toFixed(0) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Forest left', Math.floor(r.saved) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Trees burned / cleared', r.burned + ' / ' + r.carved],
       ['Lives left', String(Math.max(0, S.lives))],
     ];
     let y = P.y + 112;
@@ -1136,7 +1187,7 @@ function drawOverlay(now) {
     centerText('Out of lives', P.cx, P.y + 54, '600 30px ' + SERIF, '#ff9e7a');
     centerText('You reached ' + (S.season < LEVELS.length ? 'season ' + (S.season + 1) : S.cfg.name), P.cx, P.y + 90, '15px ' + UI, '#c9c6b6');
     centerText('Score ' + S.score, P.cx, P.y + 130, '700 24px ' + UI, '#f2ead6');
-    centerText(S.score >= S.best && S.score > 0 ? 'A new best' : 'Best ' + S.best, P.cx, P.y + 158, '14px ' + UI, '#9ff3e4');
+    centerText(S.score > S.bestAtStart && S.score > 0 ? 'A new best' : 'Best ' + S.best, P.cx, P.y + 158, '14px ' + UI, '#9ff3e4');
     if (S.modeT > 700) centerText('Enter to return to the title', P.cx, P.y + 200, '600 14px ' + UI, '#c9b27f');
   } else if (m === 'victory') {
     ctx.fillStyle = 'rgba(8,10,7,0.45)'; ctx.fillRect(OX, OY, BW, BH);
@@ -1155,7 +1206,7 @@ function drawOverlay(now) {
 function render(now) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.fillStyle = '#0c0e0b'; ctx.fillRect(0, 0, VW, VH);
-  if (S.dirty) drawTerrain();
+  if (S.dirty) drawTerrain(); else if (S.dirtyList.length) patchTerrain();
   const sh = S.fx.shake;
   ctx.save();
   if (sh > 0) ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
@@ -1171,7 +1222,14 @@ function render(now) {
   ctx.restore();
   ctx.strokeStyle = '#2a3224'; ctx.lineWidth = 2; ctx.strokeRect(OX - 1, OY - 1, BW + 2, BH + 2);
   drawHUD(now);
-  drawOverlay(now);
+  const os = Math.max(1, HS);
+  if (os === 1) drawOverlay(now);
+  else {
+    const keep = [OX, OY, BW, BH];
+    ctx.save(); ctx.setTransform(DPR * os, 0, 0, DPR * os, 0, 0);
+    OX /= os; OY /= os; BW /= os; BH /= os;
+    try { drawOverlay(now); } finally { OX = keep[0]; OY = keep[1]; BW = keep[2]; BH = keep[3]; ctx.restore(); }
+  }
 }
 
 // ---------------------------------------------------------------- main loop
@@ -1189,7 +1247,7 @@ function frame(now) {
   }
   if ((S.mode === 'title' || S.mode === 'howto') && !API.manual) demoUpdate(dt);
   if (S.mode === 'dying' && S.modeT > 1300) afterDeath();
-  updateFx(dt);
+  if (S.mode !== 'paused') updateFx(dt);
   render(now);
   requestAnimationFrame(frame);
 }

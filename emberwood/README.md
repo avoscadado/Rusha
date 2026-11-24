@@ -16,7 +16,8 @@ In classic Snake the board is inert and the only thing that changes is you. In E
 - Your head clears every tree it moves into. The bare ground you leave behind is permanent.
 - Lightning (marked a few seconds ahead by pulsing rings) sets the forest on fire. Fire spreads tree to tree, much faster downwind, and the wind turns during a season.
 - Fire cannot cross bare ground, meadow, ash, rock or water. So the trail you carve as a snake is your firebreak. You contain fires by drawing lines around and ahead of them.
-- Pushing through trees is slower than moving over open ground, so your old trails become roads. You end up building a road network and a firebreak network at the same time.
+- Pushing through trees is slower than moving over open ground, and every tree you clear costs half as much forest as a tree that burns. So your old trails become roads, and you end up building a road network and a firebreak network at the same time, carving only where it pays.
+- When the HUD says embers fly, strong wind throws sparks over one-cell breaks. Cut two wide on the downwind side.
 - Clearing a lightning mark before it lands grounds the bolt.
 
 Each season ends when the storm has passed and the last flame is out. Keep the forest above that season's target or lose a life.
