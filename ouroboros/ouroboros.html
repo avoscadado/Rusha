@@ -1,0 +1,965 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ouroboros</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='10' fill='none' stroke='%236dffb0' stroke-width='5' stroke-dasharray='52 11'/%3E%3C/svg%3E">
+<style>
+html,body{margin:0;height:100%;background:#070a10;overflow:hidden}
+canvas{display:block;width:100vw;height:100vh;outline:none;touch-action:none}
+noscript{position:fixed;top:40%;left:0;right:0;text-align:center;color:#cfe;font:16px sans-serif}
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0"></canvas>
+<noscript>Ouroboros needs JavaScript. Open this file in Safari or Chrome.</noscript>
+
+<script id="core">
+/* ==========================================================================
+   OUROBOROS core: pure game logic, no DOM. Everything is a function of the
+   tick number, which is what lets an Echo replay a past day exactly.
+   ========================================================================== */
+(function (root) {
+'use strict';
+
+const DIRS = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }]; // 0 up, 1 right, 2 down, 3 left
+
+const CFG = {
+  cols: 44, rows: 28,          // the classic Nokia board is roughly 20 x 20; this is about three times the area
+  tickMs: 112,                 // one move every 112 ms
+  dayTicks: 620,               // one day is about 70 seconds
+  days: 5,
+  startLen: 4,
+  rewinds: 3, maxRewinds: 5,
+  // fruit schedule (identical every day)
+  firstWave: 10, waveEvery: 62, waveJitter: 6, waveSize: 6, lastWaveMargin: 70,
+  stagger: 6, life: 64, lifeJitter: 10, minGap: 2,
+  // scoring
+  fruitPoints: 100, comboWindow: 36, comboMax: 4, dayBonus: 250, nearMiss: 25,
+  perfectBonus: 5000, rewindBonus: 1000,
+  telegraph: 20                // ticks of warning before a fruit appears
+};
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* The fruit schedule. Fruit arrives in waves, one per zone of the board, and rots if nobody eats it. */
+function makePlan(seed, cfg) {
+  const rnd = mulberry32(seed >>> 0);
+  const C = cfg.cols, R = cfg.rows, zc = 3, zr = 2, zones = [];
+  for (let j = 0; j < zr; j++) {
+    for (let i = 0; i < zc; i++) {
+      zones.push({
+        x0: Math.max(1, Math.floor(i * C / zc)), x1: Math.min(C - 2, Math.floor((i + 1) * C / zc) - 1),
+        y0: Math.max(1, Math.floor(j * R / zr)), y1: Math.min(R - 2, Math.floor((j + 1) * R / zr) - 1)
+      });
+    }
+  }
+  const fruits = [];
+  let w = cfg.firstWave, wave = 0;
+  while (w < cfg.dayTicks - cfg.lastWaveMargin) {
+    const order = zones.map(function (_, i) { return i; });
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(rnd() * (i + 1)); const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    }
+    for (let k = 0; k < cfg.waveSize; k++) {
+      const z = zones[order[k % order.length]];
+      const t0 = w + Math.floor(rnd() * (cfg.stagger + 1));
+      const t1 = t0 + cfg.life + Math.floor(rnd() * (cfg.lifeJitter + 1));
+      let spot = null;
+      for (let tries = 0; tries < 30 && !spot; tries++) {
+        const x = z.x0 + Math.floor(rnd() * (z.x1 - z.x0 + 1));
+        const y = z.y0 + Math.floor(rnd() * (z.y1 - z.y0 + 1));
+        let ok = true;
+        for (let q = 0; q < fruits.length; q++) {
+          const f = fruits[q];
+          if (f.t0 < t1 && t0 < f.t1 && Math.max(Math.abs(f.x - x), Math.abs(f.y - y)) <= cfg.minGap) { ok = false; break; }
+        }
+        if (ok) spot = { x: x, y: y };
+      }
+      if (spot) fruits.push({ id: fruits.length, x: spot.x, y: spot.y, t0: t0, t1: t1, wave: wave });
+    }
+    w += cfg.waveEvery + Math.floor((rnd() * 2 - 1) * cfg.waveJitter);
+    wave++;
+  }
+  return { seed: seed >>> 0, fruits: fruits };
+}
+
+/* A Run is one snake's whole day: every cell its head ever entered, and when it grew.
+   The body at tick t is simply the last lens[t] cells of the path up to the head. */
+class Run {
+  constructor(sx, sy, dir, len0) {
+    this.len0 = len0; this.dir = dir; this.startDir = dir;
+    this.px = []; this.py = [];
+    const d = DIRS[dir];
+    for (let i = 0; i < len0; i++) {
+      this.px.push(sx - d.x * (len0 - 1 - i));
+      this.py.push(sy - d.y * (len0 - 1 - i));
+    }
+    this.lens = [len0];   // body length after tick t
+    this.ateId = [-1];    // fruit eaten at tick t, or -1
+    this.ateIdx = [];     // path indices of the cells where fruit was eaten
+    this.t = 0;           // ticks recorded
+    this.count = 0;       // fruit eaten
+    this.color = -1;      // echo colour slot once frozen
+  }
+  hi(t) { return this.len0 - 1 + t; }
+  si(t) { return this.hi(t) - this.lens[t] + 1; }
+  push(x, y, fruitId) {
+    this.px.push(x); this.py.push(y); this.t++;
+    this.lens.push(this.lens[this.t - 1] + (fruitId >= 0 ? 1 : 0));
+    this.ateId.push(fruitId);
+    if (fruitId >= 0) { this.ateIdx.push(this.hi(this.t)); this.count++; }
+  }
+}
+
+class Game {
+  constructor(seed, over) {
+    this.cfg = Object.assign({}, CFG, over || {});
+    this.seed = seed >>> 0;
+    this.plan = makePlan(this.seed, this.cfg);
+    this.fruits = this.plan.fruits;
+    const C = this.cfg.cols, R = this.cfg.rows;
+    this.cellFruit = new Array(C * R);
+    for (let i = 0; i < this.fruits.length; i++) {
+      const f = this.fruits[i], k = f.x + f.y * C;
+      (this.cellFruit[k] = this.cellFruit[k] || []).push(i);
+    }
+    this.spawnAt = new Uint8Array(this.cfg.dayTicks + 2);
+    for (let i = 0; i < this.fruits.length; i++) if (this.fruits[i].t0 <= this.cfg.dayTicks) this.spawnAt[this.fruits[i].t0]++;
+    this.occ = new Uint8Array(C * R);
+    this.echoes = [];
+    this.dayIndex = 0; this.attempt = 1;
+    this.rewinds = this.cfg.rewinds;
+    this.score = 0;
+    this.stats = { deaths: 0, near: 0, bestCombo: 0 };
+    this.history = [];
+    this.final = null;
+    this.beginDay();
+  }
+
+  get total() { return this.fruits.length; }
+  freeCount() { let n = 0; for (let i = 0; i < this.fruits.length; i++) if (this.owner[i] < 0 && !this.eaten[i]) n++; return n; }
+  harvested() { return this.fruits.length - this.freeCount(); }
+
+  beginDay() {
+    const cfg = this.cfg, n = this.fruits.length;
+    this.owner = new Int16Array(n).fill(-1);
+    this.ownTick = new Int32Array(n).fill(-1);
+    for (let k = 0; k < this.echoes.length; k++) {
+      const e = this.echoes[k];
+      for (let t = 1; t <= e.t; t++) if (e.ateId[t] >= 0) { this.owner[e.ateId[t]] = k; this.ownTick[e.ateId[t]] = t; }
+    }
+    this.eaten = new Uint8Array(n);
+    const sp = this.chooseSpawn();
+    this.run = new Run(sp.x, sp.y, sp.d, cfg.startLen);
+    this.queue = [];
+    this.dayScore = 0; this.combo = 0; this.lastEatT = -999; this.nearCool = 0;
+    this.death = null; this.gainedRewind = false;
+    this.status = 'ready';
+  }
+
+  /* Where today's snake starts: the first spot (in a rotating order) that no Echo passes near in the opening seconds. */
+  chooseSpawn() {
+    const cfg = this.cfg, C = cfg.cols, R = cfg.rows, L = cfg.startLen, AHEAD = 18;
+    const fx = [0.16, 0.84, 0.32, 0.68, 0.5, 0.16, 0.84, 0.32, 0.68, 0.5, 0.16, 0.84, 0.32, 0.68];
+    const fy = [0.5, 0.5, 0.5, 0.5, 0.5, 0.22, 0.78, 0.22, 0.78, 0.22, 0.78, 0.22, 0.78, 0.78];
+    const cands = [];
+    for (let i = 0; i < fx.length; i++) {
+      const x = Math.round(fx[i] * C), y = Math.round(fy[i] * R);
+      cands.push({ x: x, y: y, d: fx[i] < 0.5 ? 1 : (fx[i] > 0.5 ? 3 : (fy[i] < 0.5 ? 1 : 3)) });
+    }
+    const off = (this.dayIndex * 3) % cands.length;
+    let best = null, bestClear = -1;
+    for (let n = 0; n < cands.length; n++) {
+      const c = cands[(n + off) % cands.length], d = DIRS[c.d];
+      let clear = 99;
+      for (let k = 0; k <= AHEAD && clear > 0; k++) {
+        for (let q = 0; q < this.echoes.length; q++) {
+          const e = this.echoes[q], te = Math.min(k, e.t), h = e.hi(te), s = e.si(te);
+          for (let i = s; i <= h; i++) {
+            for (let j = 0; j < L; j++) {
+              const dist = Math.max(Math.abs(e.px[i] - (c.x + d.x * (k - j))), Math.abs(e.py[i] - (c.y + d.y * (k - j))));
+              if (dist < clear) clear = dist;
+            }
+          }
+        }
+      }
+      if (clear >= 6) return c;
+      if (clear > bestClear) { bestClear = clear; best = c; }
+    }
+    return best;
+  }
+
+  /* Direction input with a two-deep buffer; reversing or repeating is ignored. */
+  input(d) {
+    if (this.status !== 'ready' && this.status !== 'play') return false;
+    if (this.queue.length >= 2) return false;
+    const last = this.queue.length ? this.queue[this.queue.length - 1] : this.run.dir;
+    if (d === last || d === ((last + 2) & 3)) return false;
+    this.queue.push(d);
+    return true;
+  }
+  begin() { if (this.status === 'ready') this.status = 'play'; }
+
+  echoOcc(t, out) {
+    const C = this.cfg.cols;
+    out.fill(0);
+    for (let k = 0; k < this.echoes.length; k++) {
+      const e = this.echoes[k], te = Math.min(t, e.t), h = e.hi(te), s = e.si(te);
+      for (let i = s; i <= h; i++) out[e.px[i] + e.py[i] * C] = k + 1;
+    }
+    return out;
+  }
+
+  die(ev, reason, x, y, echo) {
+    this.status = 'dead';
+    this.death = { reason: reason, x: x, y: y, echo: echo, t: this.run.t };
+    ev.dead = this.death;
+    return ev;
+  }
+
+  step() {
+    if (this.status !== 'play') return null;
+    const cfg = this.cfg, C = cfg.cols, R = cfg.rows, run = this.run;
+    const ev = { ate: -1, points: 0, combo: 0, echoAte: [], dead: null, near: false, spawned: 0, done: false, victory: false };
+    if (this.queue.length) run.dir = this.queue.shift();
+    const d = DIRS[run.dir], h0 = run.hi(run.t);
+    const hx = run.px[h0] + d.x, hy = run.py[h0] + d.y, t = run.t + 1;
+    if (hx < 0 || hx >= C || hy < 0 || hy >= R) return this.die(ev, 'wall', hx, hy, -1);
+
+    let ate = -1;
+    const list = this.cellFruit[hx + hy * C];
+    if (list) {
+      for (let i = 0; i < list.length; i++) {
+        const id = list[i], f = this.fruits[id];
+        if (this.owner[id] < 0 && !this.eaten[id] && f.t0 <= t && t < f.t1) { ate = id; break; }
+      }
+    }
+    run.push(hx, hy, ate);
+    const hi = run.hi(t), si = run.si(t);
+    for (let i = si; i < hi; i++) if (run.px[i] === hx && run.py[i] === hy) return this.die(ev, 'self', hx, hy, -1);
+    const occ = this.echoOcc(t, this.occ);
+    for (let i = hi; i >= si; i--) {
+      const o = occ[run.px[i] + run.py[i] * C];
+      if (o) return this.die(ev, 'echo', run.px[i], run.py[i], o - 1);
+    }
+
+    // survived this tick
+    if (ate >= 0) {
+      this.eaten[ate] = 1;
+      this.combo = (t - this.lastEatT <= cfg.comboWindow) ? Math.min(cfg.comboMax, this.combo + 1) : 0;
+      this.lastEatT = t;
+      if (this.combo > this.stats.bestCombo) this.stats.bestCombo = this.combo;
+      ev.ate = ate; ev.combo = this.combo; ev.points = cfg.fruitPoints * (1 + this.combo);
+      this.dayScore += ev.points;
+    }
+    for (let k = 0; k < this.echoes.length; k++) {
+      const e = this.echoes[k];
+      if (t <= e.t && e.ateId[t] >= 0) ev.echoAte.push({ id: e.ateId[t], echo: k });
+    }
+    if (this.nearCool > 0) this.nearCool--;
+    for (let k = 0; k < this.echoes.length && this.nearCool === 0; k++) {
+      const e = this.echoes[k], eh = e.hi(Math.min(t, e.t));
+      if (Math.abs(e.px[eh] - hx) <= 1 && Math.abs(e.py[eh] - hy) <= 1) {
+        ev.near = true; this.nearCool = 8; this.dayScore += cfg.nearMiss; this.stats.near++;
+      }
+    }
+    ev.spawned = this.spawnAt[t] || 0;
+
+    if (ate >= 0 && this.freeCount() === 0) { this.finishDay(true); ev.done = true; ev.victory = true; }
+    else if (t >= cfg.dayTicks) { this.finishDay(false); ev.done = true; }
+    return ev;
+  }
+
+  finishDay(victory) {
+    const cfg = this.cfg, run = this.run;
+    run.color = this.echoes.length;
+    this.echoes.push(run);
+    this.dayClear = cfg.dayBonus * (this.dayIndex + 1);
+    this.score += this.dayScore + this.dayClear;
+    this.history.push({ day: this.dayIndex + 1, attempts: this.attempt, eaten: run.count });
+    const last = victory || this.dayIndex >= cfg.days - 1;
+    if (last) { this.endGame(victory, false); return; }
+    if (this.attempt === 1 && this.rewinds < cfg.maxRewinds) { this.rewinds++; this.gainedRewind = true; }
+    this.status = 'dayDone';
+  }
+
+  nextDay() {
+    if (this.status !== 'dayDone') return false;
+    this.dayIndex++; this.attempt = 1;
+    this.beginDay();
+    return true;
+  }
+
+  /* After a death: rewind the day if any rewinds remain, otherwise the game ends. */
+  afterDeath() {
+    if (this.status !== 'dead') return false;
+    this.stats.deaths++;
+    if (this.rewinds > 0) { this.rewinds--; this.attempt++; this.beginDay(); return true; }
+    // the run is over: the day you died in is lost, so its fruit and points do not count
+    this.eaten.fill(0); this.dayScore = 0; this.run.count = 0;
+    this.endGame(false, true);
+    return false;
+  }
+
+  endGame(victory, died) {
+    const cfg = this.cfg, harvested = this.harvested(), ratio = harvested / Math.max(1, this.fruits.length);
+    if (victory) this.score += cfg.perfectBonus + this.rewinds * cfg.rewindBonus;
+    this.final = { victory: victory, died: !!died, harvested: harvested, total: this.fruits.length, ratio: ratio, rank: Game.rank(ratio, victory), score: this.score };
+    this.status = 'final';
+  }
+  static rank(ratio, victory) {
+    if (victory) return 'OUROBOROS';
+    if (ratio >= 0.9) return 'Harvest Master';
+    if (ratio >= 0.75) return 'Gardener';
+    if (ratio >= 0.5) return 'Seedling';
+    return 'Sleepwalker';
+  }
+}
+
+root.Ouro = { CFG: CFG, DIRS: DIRS, mulberry32: mulberry32, makePlan: makePlan, Run: Run, Game: Game };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+
+<script id="app">
+/* ==========================================================================
+   OUROBOROS front end: drawing, input, sound.
+   ========================================================================== */
+(function () {
+'use strict';
+const O = window.Ouro, CFG = O.CFG, COLS = CFG.cols, ROWS = CFG.rows;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif';
+const PAL = {
+  bg: '#070a10', text: '#e8f1ff', dim: '#8aa0ba', faint: '#51657d',
+  you: '#6dffb0', youBody: '#2fcf86', youHi: '#c9ffe2',
+  fruit: '#ff9f55', fruitHi: '#ffe0b8', danger: '#ff5a6e',
+  echo: ['#58c8ff', '#b58cff', '#ffc457', '#ff7ca8', '#7dffe8']
+};
+const echoColor = function (i) { return PAL.echo[((i % PAL.echo.length) + PAL.echo.length) % PAL.echo.length]; };
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+
+let DPR = 1, W = 0, H = 0, hudH = 0, cs = 10, ox = 0, oy = 0, bw = 0, bh = 0, u = 1, bgCanvas = null;
+let game = null, phase = 'title', phaseT = 0, acc = 0, lastTs = 0, shakeT = 0, shakeMag = 0, frame = 0;
+let particles = [], floaters = [], banner = null, tutorialShown = false;
+const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+/* ---------- storage (may be unavailable, e.g. private windows) ---------- */
+function loadBest() { try { return JSON.parse(localStorage.getItem('ouroboros.best.v1')) || { score: 0, ratio: 0 }; } catch (e) { return { score: 0, ratio: 0 }; } }
+function saveBest() {
+  if (!game || !game.final) return;
+  const b = loadBest(), f = game.final;
+  b.score = Math.max(b.score || 0, f.score); b.ratio = Math.max(b.ratio || 0, f.ratio);
+  try { localStorage.setItem('ouroboros.best.v1', JSON.stringify(b)); } catch (e) { /* ignore */ }
+  best = b;
+}
+let best = loadBest();
+const seedParam = (function () { const m = /[?&]seed=(\d+)/.exec(location.search || ''); return m ? (+m[1] >>> 0) : null; })();
+
+/* ---------- sound (synthesised; starts after the first key press) ---------- */
+const Sfx = (function () {
+  let ac = null, master = null, muted = false;
+  function init() {
+    if (ac) { if (ac.state === 'suspended') { try { ac.resume(); } catch (e) { /* ignore */ } } return; }
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      ac = new AC(); master = ac.createGain(); master.gain.value = 0.2; master.connect(ac.destination);
+    } catch (e) { ac = null; }
+  }
+  function tone(f, dur, type, vol, f2, delay) {
+    if (!ac || muted) return;
+    try {
+      const t0 = ac.currentTime + (delay || 0), o = ac.createOscillator(), g = ac.createGain();
+      o.type = type || 'sine'; o.frequency.setValueAtTime(f, t0);
+      if (f2) o.frequency.exponentialRampToValueAtTime(f2, t0 + dur);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + dur + 0.03);
+    } catch (e) { /* ignore */ }
+  }
+  function noise(dur, vol) {
+    if (!ac || muted) return;
+    try {
+      const n = Math.floor(ac.sampleRate * dur), buf = ac.createBuffer(1, n, ac.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+      const s = ac.createBufferSource(), g = ac.createGain(), f = ac.createBiquadFilter();
+      f.type = 'lowpass'; f.frequency.value = 900; g.gain.value = vol;
+      s.buffer = buf; s.connect(f); f.connect(g); g.connect(master); s.start();
+    } catch (e) { /* ignore */ }
+  }
+  return {
+    init: init,
+    toggle: function () { muted = !muted; return muted; },
+    isMuted: function () { return muted; },
+    eat: function (c) { tone(520 + c * 110, 0.09, 'triangle', 0.5, 900 + c * 140); },
+    echoEat: function () { tone(300, 0.07, 'sine', 0.16, 220); },
+    near: function () { tone(1400, 0.05, 'square', 0.07, 1900); },
+    spawn: function () { tone(880, 0.05, 'sine', 0.05, 1100); },
+    die: function () { noise(0.5, 0.5); tone(220, 0.5, 'sawtooth', 0.25, 50); },
+    rewind: function () { tone(120, 0.6, 'sawtooth', 0.12, 900); tone(240, 0.6, 'triangle', 0.1, 1400, 0.05); },
+    dayEnd: function () { [523, 659, 784, 1046].forEach(function (f, i) { tone(f, 0.28, 'triangle', 0.25, 0, i * 0.09); }); },
+    win: function () { [523, 659, 784, 1046, 1318, 1568].forEach(function (f, i) { tone(f, 0.4, 'triangle', 0.25, 0, i * 0.11); }); },
+    over: function () { [392, 330, 262, 196].forEach(function (f, i) { tone(f, 0.35, 'sine', 0.25, 0, i * 0.14); }); },
+    start: function () { tone(330, 0.12, 'triangle', 0.25, 660); }
+  };
+})();
+
+/* ---------- layout ---------- */
+function layout() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = Math.max(200, window.innerWidth); H = Math.max(200, window.innerHeight);
+  canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  u = Math.max(0.5, Math.min(1.7, Math.min(W / 1280, H / 800)));
+  hudH = Math.max(44, Math.min(80, Math.round(H * 0.09)));
+  const pad = Math.max(6, Math.round(Math.min(W, H) * 0.012));
+  const availW = W - pad * 2, availH = H - hudH - pad;
+  cs = Math.max(6, Math.floor(Math.min(availW / COLS, availH / ROWS) * DPR) / DPR);
+  bw = cs * COLS; bh = cs * ROWS;
+  ox = Math.round((W - bw) / 2); oy = Math.round(hudH + (availH - bh) / 2);
+  buildBg();
+}
+function buildBg() {
+  bgCanvas = document.createElement('canvas');
+  bgCanvas.width = Math.max(1, Math.round(bw * DPR)); bgCanvas.height = Math.max(1, Math.round(bh * DPR));
+  const g = bgCanvas.getContext('2d');
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  const grd = g.createLinearGradient(0, 0, 0, bh);
+  grd.addColorStop(0, '#0e1520'); grd.addColorStop(1, '#0a1019');
+  g.fillStyle = grd; g.fillRect(0, 0, bw, bh);
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    if ((x + y) & 1) { g.fillStyle = 'rgba(160,200,255,0.022)'; g.fillRect(x * cs, y * cs, cs, cs); }
+  }
+  g.fillStyle = 'rgba(160,200,255,0.10)';
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    g.beginPath(); g.arc((x + 0.5) * cs, (y + 0.5) * cs, Math.max(0.6, cs * 0.04), 0, 6.2832); g.fill();
+  }
+  const v = g.createRadialGradient(bw / 2, bh / 2, Math.min(bw, bh) * 0.35, bw / 2, bh / 2, Math.max(bw, bh) * 0.75);
+  v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.38)');
+  g.fillStyle = v; g.fillRect(0, 0, bw, bh);
+}
+
+/* ---------- small drawing helpers ---------- */
+function rr(x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h); ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r); ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y); ctx.closePath();
+}
+function txt(s, x, y, size, weight, color, align, alpha) {
+  ctx.font = weight + ' ' + Math.round(size) + 'px ' + FONT;
+  ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle';
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha; ctx.fillStyle = color; ctx.fillText(s, x, y); ctx.globalAlpha = 1;
+}
+function wrap(s, maxW) {
+  const words = s.split(' '), lines = []; let line = '';
+  for (let i = 0; i < words.length; i++) {
+    const test = line ? line + ' ' + words[i] : words[i];
+    if (ctx.measureText(test).width > maxW && line) { lines.push(line); line = words[i]; } else line = test;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+function strokeSmooth(p) {
+  const n = p.length / 2;
+  ctx.beginPath(); ctx.moveTo(p[0], p[1]);
+  if (n === 2) { ctx.lineTo(p[2], p[3]); ctx.stroke(); return; }
+  for (let i = 1; i < n - 1; i++) {
+    ctx.quadraticCurveTo(p[2 * i], p[2 * i + 1], (p[2 * i] + p[2 * i + 2]) / 2, (p[2 * i + 1] + p[2 * i + 3]) / 2);
+  }
+  ctx.lineTo(p[2 * n - 2], p[2 * n - 1]);
+  ctx.stroke();
+}
+function clamp01(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+
+/* ---------- snakes ---------- */
+function snakePoints(run, t, alpha) {
+  const hi = run.hi(t), si = run.si(t), p = [];
+  let hx = run.px[hi], hy = run.py[hi];
+  const moving = t > 0 && alpha < 1;
+  if (moving) { hx = run.px[hi - 1] + (hx - run.px[hi - 1]) * alpha; hy = run.py[hi - 1] + (hy - run.py[hi - 1]) * alpha; }
+  p.push((hx + 0.5) * cs, (hy + 0.5) * cs);
+  for (let i = hi - 1; i >= si; i--) p.push((run.px[i] + 0.5) * cs, (run.py[i] + 0.5) * cs);
+  if (moving) {
+    const sp = run.si(t - 1);
+    if (sp !== si) {
+      const f = 1 - alpha;
+      p.push((run.px[si] + (run.px[sp] - run.px[si]) * f + 0.5) * cs, (run.py[si] + (run.py[sp] - run.py[si]) * f + 0.5) * cs);
+    }
+  }
+  return { pts: p, hx: (hx + 0.5) * cs, hy: (hy + 0.5) * cs };
+}
+function drawSnake(run, t, alpha, o) {
+  const sp = snakePoints(run, t, alpha), hi = run.hi(t), si = run.si(t);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.globalAlpha = o.alpha * 0.16; ctx.strokeStyle = o.color; ctx.lineWidth = cs * 1.0; strokeSmooth(sp.pts);
+  ctx.globalAlpha = o.alpha; ctx.strokeStyle = o.body; ctx.lineWidth = cs * 0.66; strokeSmooth(sp.pts);
+  ctx.globalAlpha = o.alpha * 0.55; ctx.strokeStyle = o.hi; ctx.lineWidth = cs * 0.2; strokeSmooth(sp.pts);
+  ctx.globalAlpha = o.alpha * 0.9; ctx.fillStyle = o.hi;
+  for (let k = 0; k < run.ateIdx.length; k++) {
+    const idx = run.ateIdx[k];
+    if (idx >= si && idx < hi) { ctx.beginPath(); ctx.arc((run.px[idx] + 0.5) * cs, (run.py[idx] + 0.5) * cs, cs * 0.34, 0, 6.2832); ctx.fill(); }
+  }
+  // head
+  let dx = DIRS_X[run.startDir], dy = DIRS_Y[run.startDir];
+  if (hi >= 1) { dx = run.px[hi] - run.px[hi - 1]; dy = run.py[hi] - run.py[hi - 1]; }
+  ctx.globalAlpha = o.alpha; ctx.fillStyle = o.color;
+  ctx.beginPath(); ctx.arc(sp.hx, sp.hy, cs * 0.42, 0, 6.2832); ctx.fill();
+  if (o.label) {
+    ctx.font = '800 ' + Math.round(cs * 0.4) + 'px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#071018'; ctx.fillText(o.label, sp.hx, sp.hy + cs * 0.02);
+  } else {
+    const px = -dy, py = dx;
+    for (let s = -1; s <= 1; s += 2) {
+      const ex = sp.hx + dx * cs * 0.12 + px * s * cs * 0.17, ey = sp.hy + dy * cs * 0.12 + py * s * cs * 0.17;
+      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(ex, ey, cs * 0.11, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = '#05140d'; ctx.beginPath(); ctx.arc(ex + dx * cs * 0.04, ey + dy * cs * 0.04, cs * 0.055, 0, 6.2832); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+const DIRS_X = [0, 1, 0, -1], DIRS_Y = [-1, 0, 1, 0];
+
+function drawEchoPreview(e, t) {
+  const te = Math.min(t, e.t), end = Math.min(e.t, te + 14);
+  if (end <= te) return;
+  const h = e.hi(te), h2 = e.hi(end);
+  ctx.save();
+  ctx.setLineDash([cs * 0.16, cs * 0.26]); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.strokeStyle = echoColor(e.color); ctx.globalAlpha = 0.38; ctx.lineWidth = Math.max(1.2, cs * 0.1);
+  const p = [];
+  for (let i = h; i <= h2; i++) p.push((e.px[i] + 0.5) * cs, (e.py[i] + 0.5) * cs);
+  if (p.length >= 4) strokeSmooth(p);
+  ctx.restore();
+}
+
+/* ---------- fruit ---------- */
+function drawFruits(t, alpha, ts) {
+  const g = game, tf = t + alpha;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < g.fruits.length; i++) {
+    if (g.eaten[i]) continue;
+    const f = g.fruits[i], cx = (f.x + 0.5) * cs, cy = (f.y + 0.5) * cs, own = g.owner[i];
+    if (t < f.t0) {
+      const lead = f.t0 - tf;
+      if (lead <= CFG.telegraph) {
+        const k = 1 - lead / CFG.telegraph;
+        ctx.save(); ctx.setLineDash([cs * 0.1, cs * 0.14]);
+        ctx.globalAlpha = 0.12 + 0.4 * k; ctx.strokeStyle = own >= 0 ? echoColor(own) : '#ffffff';
+        ctx.lineWidth = Math.max(1, cs * 0.06);
+        ctx.beginPath(); ctx.arc(cx, cy, cs * (0.5 - 0.14 * k), 0, 6.2832); ctx.stroke(); ctx.restore();
+      }
+      continue;
+    }
+    if (own >= 0) {
+      if (t >= g.ownTick[i]) continue;
+      const pulse = 1 + 0.07 * Math.sin(ts / 260 + i);
+      ctx.strokeStyle = echoColor(own); ctx.globalAlpha = 0.9; ctx.lineWidth = Math.max(1.5, cs * 0.09);
+      ctx.beginPath(); ctx.arc(cx, cy, cs * 0.3 * pulse, 0, 6.2832); ctx.stroke();
+      ctx.globalAlpha = 0.5; ctx.fillStyle = echoColor(own); ctx.beginPath(); ctx.arc(cx, cy, cs * 0.08, 0, 6.2832); ctx.fill();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+    if (t >= f.t1) continue;
+    const rem = clamp01((f.t1 - tf) / (f.t1 - f.t0));
+    const s = Math.min(1, (tf - f.t0) / 4), pop = 1 - Math.pow(1 - s, 3);
+    const r = cs * 0.3 * pop * (1 + 0.05 * Math.sin(ts / 200 + i));
+    ctx.globalAlpha = 0.22; ctx.fillStyle = PAL.fruit; ctx.beginPath(); ctx.arc(cx, cy, r * 1.9, 0, 6.2832); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = PAL.fruit; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = PAL.fruitHi; ctx.globalAlpha = 0.85; ctx.beginPath(); ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.3, 0, 6.2832); ctx.fill();
+    // rot ring: shrinks as the fruit spoils
+    const blink = rem < 0.22 && (Math.floor(ts / 110) & 1);
+    ctx.globalAlpha = blink ? 0.25 : 0.9;
+    ctx.strokeStyle = rem > 0.5 ? '#9dffc0' : (rem > 0.25 ? '#ffe36b' : '#ff6b6b');
+    ctx.lineWidth = Math.max(1.5, cs * 0.075);
+    ctx.beginPath(); ctx.arc(cx, cy, cs * 0.46, -Math.PI / 2, -Math.PI / 2 + 6.2832 * rem); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* ---------- particles ---------- */
+function burst(cx, cy, color, n, speed, life) {
+  if (particles.length > 400) return;
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * 6.2832, s = (0.4 + Math.random()) * speed;
+    particles.push({ x: cx, y: cy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: life * (0.6 + Math.random() * 0.6), max: life, color: color, size: cs * (0.05 + Math.random() * 0.08) });
+  }
+}
+function floater(cx, cy, text, color) { floaters.push({ x: cx, y: cy, text: text, color: color, life: 900, max: 900 }); }
+function stepFx(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i]; p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt / 1000; p.y += p.vy * dt / 1000; p.vx *= 0.96; p.vy *= 0.96;
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i]; f.life -= dt; if (f.life <= 0) { floaters.splice(i, 1); continue; } f.y -= dt * 0.03 * u;
+  }
+  if (shakeT > 0) shakeT -= dt;
+}
+function drawFx() {
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    ctx.globalAlpha = clamp01(p.life / p.max); ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 6.2832); ctx.fill();
+  }
+  for (let i = 0; i < floaters.length; i++) {
+    const f = floaters[i], k = clamp01(f.life / f.max);
+    txt(f.text, f.x, f.y, cs * 0.7, 800, f.color, 'center', k);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- board and HUD ---------- */
+function drawBoard(ts) {
+  const g = game, run = g.run, t = run.t, tm = g.cfg.tickMs;
+  const alpha = phase === 'play' ? clamp01(acc / tm) : 1;
+  let sx = 0, sy = 0;
+  if (shakeT > 0 && !reduceMotion) { sx = (Math.random() - 0.5) * shakeMag; sy = (Math.random() - 0.5) * shakeMag; }
+  ctx.save();
+  ctx.translate(ox + sx, oy + sy);
+  ctx.drawImage(bgCanvas, 0, 0, bw, bh);
+  // the sky of the day: dawn teal, noon blue, dusk plum
+  const prog = clamp01((t + alpha) / g.cfg.dayTicks), hue = 195 + prog * 110;
+  ctx.fillStyle = 'hsla(' + hue.toFixed(0) + ',70%,45%,0.07)'; ctx.fillRect(0, 0, bw, bh);
+  ctx.beginPath(); ctx.rect(0, 0, bw, bh); ctx.clip();
+
+  for (let k = 0; k < g.echoes.length; k++) drawEchoPreview(g.echoes[k], t);
+  for (let k = 0; k < g.echoes.length; k++) {
+    const e = g.echoes[k], c = echoColor(e.color);
+    drawSnake(e, Math.min(t, e.t), t > e.t ? 1 : alpha, { color: c, body: c, hi: '#ffffff', alpha: 0.55, label: ROMAN[k] || String(k + 1) });
+  }
+  const dead = phase === 'dead';
+  drawSnake(run, t, alpha, { color: dead ? PAL.danger : PAL.you, body: dead ? '#a8283a' : PAL.youBody, hi: PAL.youHi, alpha: 1, label: null });
+  drawFruits(t, alpha, ts);
+  if (g.death && dead) {
+    const d = g.death, cx = (Math.max(0, Math.min(COLS - 1, d.x)) + 0.5) * cs, cy = (Math.max(0, Math.min(ROWS - 1, d.y)) + 0.5) * cs;
+    const k = clamp01(phaseT / 500);
+    ctx.strokeStyle = PAL.danger; ctx.lineWidth = cs * 0.12; ctx.globalAlpha = 1 - k * 0.4;
+    ctx.beginPath(); ctx.arc(cx, cy, cs * (0.6 + k * 1.2), 0, 6.2832); ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  drawFx();
+  ctx.restore();
+
+  // border and day clock
+  ctx.strokeStyle = 'hsla(' + hue.toFixed(0) + ',70%,62%,0.55)'; ctx.lineWidth = 2;
+  ctx.strokeRect(ox - 1, oy - 1, bw + 2, bh + 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(ox, oy - 8, bw, 3);
+  ctx.fillStyle = 'hsl(' + hue.toFixed(0) + ',75%,62%)'; ctx.fillRect(ox, oy - 8, bw * prog, 3);
+}
+
+function eatenCountNow() { return game.run.count; }
+function drawHud() {
+  const g = game, y1 = hudH * 0.36, y2 = hudH * 0.72;
+  txt('DAY ' + (g.dayIndex + 1) + ' / ' + g.cfg.days, ox, y1, 20 * u, 800, PAL.text, 'left');
+  const sub = g.attempt > 1 ? 'attempt ' + g.attempt : (g.echoes.length ? g.echoes.length + (g.echoes.length === 1 ? ' echo running' : ' echoes running') : 'no echoes yet');
+  txt(sub, ox, y2, 12.5 * u, 500, PAL.dim, 'left');
+
+  // harvest bar, split by who harvested what
+  const total = g.total, bx = ox + bw * 0.27, bwid = bw * 0.46, by = hudH * 0.62, bhh = Math.max(8, 11 * u);
+  txt('HARVEST  ' + g.harvested() + ' / ' + total, bx + bwid / 2, y1 - 1, 15 * u, 800, PAL.text, 'center');
+  ctx.fillStyle = 'rgba(160,200,255,0.12)'; rr(bx, by, bwid, bhh, bhh / 2); ctx.fill();
+  ctx.save(); rr(bx, by, bwid, bhh, bhh / 2); ctx.clip();
+  let acc0 = 0;
+  for (let k = 0; k < g.echoes.length; k++) {
+    const w = bwid * g.echoes[k].count / Math.max(1, total);
+    ctx.fillStyle = echoColor(g.echoes[k].color); ctx.globalAlpha = 0.85; ctx.fillRect(bx + acc0, by, w + 0.5, bhh); acc0 += w;
+  }
+  ctx.globalAlpha = 1; ctx.fillStyle = PAL.you; ctx.fillRect(bx + acc0, by, bwid * eatenCountNow() / Math.max(1, total), bhh);
+  ctx.restore();
+
+  // rewinds and score
+  const rx = ox + bw, rw = 17 * u;
+  txt(String(g.score + g.dayScore).replace(/\B(?=(\d{3})+(?!\d))/g, ','), rx, y1, 20 * u, 800, PAL.text, 'right');
+  for (let i = 0; i < g.cfg.maxRewinds; i++) {
+    // a little clock per rewind in hand
+    const cx = rx - rw * 0.5 - i * rw, cy = y2, on = i < g.rewinds, r = 6 * u;
+    ctx.strokeStyle = on ? '#9fd8ff' : 'rgba(160,200,255,0.2)'; ctx.lineWidth = Math.max(1.4, 1.8 * u); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 6.2832); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, cy - r * 0.62); ctx.lineTo(cx, cy); ctx.lineTo(cx - r * 0.46, cy + r * 0.22); ctx.stroke();
+  }
+  txt('rewinds', rx - rw * g.cfg.maxRewinds - 6 * u, y2, 12.5 * u, 500, PAL.dim, 'right');
+}
+
+/* ---------- cards and banners ---------- */
+function card(o) {
+  const a = o.alpha === undefined ? 1 : o.alpha, maxW = Math.min(W * 0.86, 640 * u);
+  ctx.save(); ctx.globalAlpha = a;
+  const items = [];
+  let h = 34 * u;
+  ctx.font = '800 ' + Math.round(30 * u) + 'px ' + FONT;
+  items.push({ s: o.title, size: 30 * u, w: 800, c: o.titleColor || PAL.text, gap: 14 * u }); h += 30 * u + 14 * u;
+  for (let i = 0; i < o.lines.length; i++) {
+    const L = o.lines[i], size = (L.size || 16) * u;
+    ctx.font = (L.w || 500) + ' ' + Math.round(size) + 'px ' + FONT;
+    const ls = wrap(L.t, maxW - 56 * u);
+    for (let j = 0; j < ls.length; j++) { items.push({ s: ls[j], size: size, w: L.w || 500, c: L.c || PAL.dim, gap: size * 0.5 }); h += size * 1.5; }
+    h += (L.after || 0) * u;
+    if (L.after) items[items.length - 1].gap += L.after * u;
+  }
+  if (o.footer) { h += 16 * u + 18 * u; }
+  h += 26 * u;
+  const cx = W / 2, cy = o.cy || H * 0.5, top = cy - h / 2;
+  rr(cx - maxW / 2, top, maxW, h, 18 * u); ctx.fillStyle = 'rgba(7,11,18,0.9)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(160,200,255,0.28)'; ctx.lineWidth = 1; ctx.stroke();
+  let y = top + 34 * u;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i]; y += it.size * (i === 0 ? 0.5 : 0.75);
+    txt(it.s, cx, y, it.size, it.w, it.c, 'center'); y += it.size * (i === 0 ? 0.5 : 0.75) + (i === 0 ? 14 * u : it.size * 0.0) + (it.gap > it.size * 0.5 ? it.gap - it.size * 0.5 : 0);
+  }
+  if (o.footer) txt(o.footer, cx, top + h - 28 * u, 14 * u, 700, PAL.you, 'center', 0.55 + 0.45 * Math.sin(frame / 14));
+  ctx.restore();
+}
+function drawBanner(lines, alpha) {
+  const maxW = Math.min(bw * 0.9, 720 * u), size = 15 * u;
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.font = '600 ' + Math.round(size) + 'px ' + FONT;
+  const all = [];
+  for (let i = 0; i < lines.length; i++) {
+    ctx.font = (i === 0 ? '800 ' : '500 ') + Math.round(i === 0 ? size * 1.25 : size) + 'px ' + FONT;
+    const ls = wrap(lines[i], maxW - 40 * u);
+    for (let j = 0; j < ls.length; j++) all.push({ s: ls[j], first: i === 0, last: i === lines.length - 1 });
+  }
+  const lh = size * 1.55, h = all.length * lh + 26 * u, top = oy + bh * 0.04;
+  rr(ox + bw / 2 - maxW / 2, top, maxW, h, 14 * u); ctx.fillStyle = 'rgba(6,10,17,0.84)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(160,200,255,0.25)'; ctx.stroke();
+  for (let i = 0; i < all.length; i++) {
+    const it = all[i];
+    txt(it.s, ox + bw / 2, top + 13 * u + lh * (i + 0.5), it.first ? size * 1.25 : size, it.first ? 800 : (it.last ? 700 : 500),
+      it.first ? PAL.text : (it.last ? PAL.you : PAL.dim), 'center', it.last && !it.first ? 0.6 + 0.4 * Math.sin(frame / 14) : 1);
+  }
+  ctx.restore();
+}
+
+/* ---------- title ---------- */
+function drawTitle(ts) {
+  ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H);
+  const cx = W / 2, cy = H * 0.34, R = Math.min(W * 0.2, H * 0.19), n = 70, a0 = ts / 2400;
+  ctx.globalAlpha = 0.5; ctx.strokeStyle = 'rgba(160,200,255,0.12)'; ctx.setLineDash([4 * u, 8 * u]); ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+  for (let i = n - 1; i >= 0; i--) {
+    const a = a0 - i * (6.2832 * 0.93 / n), k = 1 - i / n;
+    const x = cx + Math.cos(a) * R, y = cy + Math.sin(a) * R;
+    ctx.fillStyle = i === 0 ? PAL.you : echoColor(Math.floor(i / n * PAL.echo.length * 1.0));
+    ctx.globalAlpha = i === 0 ? 1 : 0.25 + 0.6 * k;
+    ctx.beginPath(); ctx.arc(x, y, (i === 0 ? 13 : 4 + 8 * k) * u, 0, 6.2832); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  const ty = cy + R + 62 * u;
+  txt('OUROBOROS', cx, ty, 54 * u, 800, PAL.text, 'center');
+  txt('Snake against your own past', cx, ty + 40 * u, 18 * u, 500, PAL.dim, 'center');
+  const rules = [
+    'Fruit appears in the same places at the same times every day, and rots if nobody eats it.',
+    'When a day ends, your snake becomes an Echo and replays itself, every day after.',
+    'Echoes re-harvest the fruit they took before, and they bite. Harvest everything else.',
+    'Five days, one harvest. Fill the whole schedule to close the loop.'
+  ];
+  for (let i = 0; i < rules.length; i++) txt(rules[i], cx, ty + 84 * u + i * 26 * u, 15 * u, 500, '#b9c9de', 'center', 0.92);
+  txt('Arrow keys or WASD to steer     P pause     M sound     F fullscreen', cx, ty + 84 * u + rules.length * 26 * u + 18 * u, 13 * u, 500, PAL.faint, 'center');
+  txt('Press Space to begin', cx, H - 52 * u, 18 * u, 800, PAL.you, 'center', 0.55 + 0.45 * Math.sin(ts / 260));
+  if (best.score > 0) txt('Best  ' + String(best.score).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '   Harvest  ' + Math.round(best.ratio * 100) + '%', cx, H - 24 * u, 13 * u, 500, PAL.dim, 'center');
+}
+
+/* ---------- flow ---------- */
+function newGame() {
+  const seed = seedParam !== null ? seedParam : ((Math.random() * 4294967296) >>> 0);
+  game = new O.Game(seed);
+  particles.length = 0; floaters.length = 0; tutorialShown = false;
+  enterReady();
+}
+function enterReady() {
+  phase = 'ready'; phaseT = 0; acc = 0;
+  const g = game, d = g.dayIndex + 1, n = g.echoes.length, lines = ['DAY ' + d + ' OF ' + g.cfg.days];
+  if (g.attempt > 1) lines.push('Rewound. ' + g.rewinds + (g.rewinds === 1 ? ' rewind' : ' rewinds') + ' left.');
+  if (n === 0) lines.push('Eat fruit before it rots. You cannot reach all of it, so choose well.');
+  else if (d === 2 && g.attempt === 1) lines.push('Your last run is now Echo I. It will take the same fruit again (hollow rings), so leave those alone and stay clear of it.');
+  else if (g.attempt === 1) lines.push(n + ' echoes are running. ' + g.freeCount() + ' fruit are still unclaimed.');
+  else lines.push(g.freeCount() + ' fruit are still unclaimed.');
+  lines.push('Press an arrow key to begin');
+  banner = lines;
+}
+function onDir(d) {
+  Sfx.init();
+  if (phase === 'ready') { game.input(d); game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start(); }
+  else if (phase === 'play') game.input(d);
+}
+function onConfirm() {
+  Sfx.init();
+  if (phase === 'title') newGame();
+  else if (phase === 'ready') { game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start(); }
+  else if (phase === 'dead' && phaseT > 450) afterDeath();
+  else if (phase === 'daydone' && phaseT > 600) { game.nextDay(); enterReady(); }
+  else if (phase === 'final' && phaseT > 800) newGame();
+  else if (phase === 'paused') { phase = 'play'; acc = 0; }
+}
+function togglePause() {
+  if (phase === 'play') { phase = 'paused'; }
+  else if (phase === 'paused') { phase = 'play'; acc = 0; }
+}
+function afterDeath() {
+  const more = game.afterDeath();
+  particles.length = 0; floaters.length = 0; acc = 0;
+  if (more) { phase = 'rewind'; phaseT = 0; Sfx.rewind(); }
+  else { phase = 'final'; phaseT = 0; saveBest(); Sfx.over(); }
+}
+function cellCenter(x, y) { return [(x + 0.5) * cs, (y + 0.5) * cs]; }
+function onEvents(ev) {
+  if (!ev) return;
+  const g = game, run = g.run, hx = run.px[run.hi(run.t)], hy = run.py[run.hi(run.t)];
+  if (ev.dead) {
+    const c = cellCenter(Math.max(0, Math.min(COLS - 1, ev.dead.x)), Math.max(0, Math.min(ROWS - 1, ev.dead.y)));
+    burst(c[0], c[1], PAL.danger, 26, cs * 7, 700); burst(c[0], c[1], PAL.you, 14, cs * 5, 600);
+    shakeT = 380; shakeMag = cs * 0.5; phase = 'dead'; phaseT = 0; acc = 0; Sfx.die();
+    return;
+  }
+  if (ev.ate >= 0) {
+    const c = cellCenter(hx, hy);
+    burst(c[0], c[1], PAL.fruit, 12, cs * 5, 520);
+    floater(c[0], c[1] - cs * 0.6, '+' + ev.points + (ev.combo > 0 ? '  x' + (ev.combo + 1) : ''), ev.combo > 0 ? '#ffe36b' : PAL.text);
+    Sfx.eat(ev.combo);
+  }
+  for (let i = 0; i < ev.echoAte.length; i++) {
+    const f = g.fruits[ev.echoAte[i].id], c = cellCenter(f.x, f.y);
+    burst(c[0], c[1], echoColor(ev.echoAte[i].echo), 9, cs * 3.5, 460); Sfx.echoEat();
+  }
+  if (ev.near) { const c = cellCenter(hx, hy); burst(c[0], c[1], '#ffffff', 8, cs * 4, 360); floater(c[0], c[1] - cs * 0.6, 'close shave +' + CFG.nearMiss, '#cfe8ff'); Sfx.near(); }
+  if (ev.spawned > 0) Sfx.spawn();
+  if (ev.done) {
+    acc = 0; phase = g.status === 'final' ? 'final' : 'daydone'; phaseT = 0;
+    if (g.status === 'final') { saveBest(); if (g.final.victory) Sfx.win(); else Sfx.dayEnd(); } else Sfx.dayEnd();
+  }
+}
+
+function update(dt) {
+  phaseT += dt;
+  if (phase === 'play') {
+    acc += dt;
+    const tm = game.cfg.tickMs;
+    let guard = 0;
+    while (acc >= tm && phase === 'play' && guard++ < 6) { acc -= tm; onEvents(game.step()); }
+    if (guard >= 6) acc = 0;
+  } else if (phase === 'dead') {
+    if (phaseT > 1300) afterDeath();
+  } else if (phase === 'rewind') {
+    if (phaseT > 750) { enterReady(); }
+  }
+  stepFx(dt);
+}
+
+/* ---------- overlays per phase ---------- */
+function drawOverlays(ts) {
+  const g = game;
+  if (phase === 'ready') drawBanner(banner || [], clamp01(phaseT / 250));
+  else if (phase === 'paused') {
+    ctx.fillStyle = 'rgba(4,7,12,0.6)'; ctx.fillRect(0, 0, W, H);
+    card({ title: 'Paused', lines: [{ t: 'P or Space to continue', c: PAL.text }, { t: 'R restart the whole run     Q back to title     M sound     F fullscreen', size: 13 }], cy: H * 0.5 });
+  } else if (phase === 'dead') {
+    const d = g.death, k = clamp01((phaseT - 250) / 300);
+    let why = d.reason === 'wall' ? 'You hit the wall.' : (d.reason === 'self' ? 'You bit yourself.' : 'Echo ' + (ROMAN[d.echo] || (d.echo + 1)) + ' caught you.');
+    drawBanner([why, g.rewinds > 0 ? 'The day rewinds. ' + g.rewinds + (g.rewinds === 1 ? ' rewind' : ' rewinds') + ' left.' : 'No rewinds left. This is the end of the run.'], k);
+  } else if (phase === 'rewind') {
+    const k = clamp01(phaseT / 750);
+    ctx.save(); ctx.globalAlpha = 0.5 * (1 - k); ctx.fillStyle = '#9fd8ff';
+    for (let i = 0; i < 18; i++) { const yy = oy + (i / 18) * bh; ctx.fillRect(ox, yy, bw * clamp01(1.4 - k * 1.4 + Math.sin(i * 12.9898) * 0.3), bh / 36); }
+    ctx.restore();
+    txt('REWIND', ox + bw / 2, oy + bh / 2, 64 * u, 800, '#dff1ff', 'center', 1 - k);
+  } else if (phase === 'daydone') {
+    const k = clamp01((phaseT - 450) / 350);
+    if (k > 0) {
+      ctx.fillStyle = 'rgba(4,7,12,' + (0.55 * k) + ')'; ctx.fillRect(0, 0, W, H);
+      const e = g.echoes[g.echoes.length - 1], nm = 'Echo ' + (ROMAN[e.color] || (e.color + 1));
+      const lines = [
+        { t: 'You harvested ' + e.count + ' fruit today.', c: PAL.text, size: 18 },
+        { t: nm + ' is born. Tomorrow it takes those ' + e.count + ' again, and it is as long as your snake was at dusk.', size: 15 },
+        { t: 'Harvest so far  ' + g.harvested() + ' of ' + g.total + '  (' + Math.round(100 * g.harvested() / g.total) + '%).  ' + g.freeCount() + ' still unclaimed.', size: 15, c: PAL.text }
+      ];
+      if (g.gainedRewind) lines.push({ t: 'Clean day. +1 rewind.', c: '#9fd8ff', size: 15 });
+      card({ title: 'Day ' + (g.dayIndex + 1) + ' complete', titleColor: echoColor(e.color), lines: lines, footer: 'Press Space for day ' + (g.dayIndex + 2), alpha: k });
+    }
+  } else if (phase === 'final') {
+    const k = clamp01((phaseT - 250) / 400), f = g.final;
+    ctx.fillStyle = 'rgba(4,7,12,' + (0.72 * k) + ')'; ctx.fillRect(0, 0, W, H);
+    // every route you ever ran, woven together
+    ctx.save(); ctx.translate(ox, oy); ctx.globalAlpha = 0.5 * k; ctx.lineWidth = Math.max(1, cs * 0.12); ctx.lineJoin = 'round';
+    for (let q = 0; q < g.echoes.length; q++) {
+      const e = g.echoes[q]; ctx.strokeStyle = echoColor(e.color); ctx.beginPath();
+      for (let i = e.len0 - 1; i < e.px.length; i++) { const X = (e.px[i] + 0.5) * cs, Y = (e.py[i] + 0.5) * cs; if (i === e.len0 - 1) ctx.moveTo(X, Y); else ctx.lineTo(X, Y); }
+      ctx.stroke();
+    }
+    ctx.restore();
+    const lines = [];
+    lines.push({ t: f.victory ? 'Every fruit harvested. The loop is closed.' : (f.died ? 'You ran out of rewinds.' : 'The fifth day is over.'), c: PAL.text, size: 17, after: 6 });
+    lines.push({ t: 'Harvest  ' + f.harvested + ' of ' + f.total + '  (' + Math.round(f.ratio * 100) + '%)', c: PAL.text, size: 20, w: 800 });
+    lines.push({ t: 'Score  ' + String(f.score).replace(/\B(?=(\d{3})+(?!\d))/g, ','), c: PAL.text, size: 20, w: 800, after: 4 });
+    const per = [];
+    for (let q = 0; q < g.history.length; q++) per.push('Day ' + g.history[q].day + ': ' + g.history[q].eaten + (g.history[q].attempts > 1 ? ' (' + g.history[q].attempts + ' tries)' : ''));
+    if (per.length) lines.push({ t: per.join('     '), size: 13 });
+    lines.push({ t: 'Close shaves  ' + g.stats.near + '     Best chain  x' + (g.stats.bestCombo + 1) + '     Deaths  ' + g.stats.deaths, size: 13 });
+    lines.push({ t: 'Best ever  ' + String(best.score).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' points, ' + Math.round(best.ratio * 100) + '% harvest', size: 13 });
+    card({ title: f.rank, titleColor: f.victory ? PAL.you : PAL.text, lines: lines, footer: 'Press Space to play again', alpha: k, cy: H * 0.52 });
+  }
+}
+
+/* ---------- main loop ---------- */
+function render(ts) {
+  frame++;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalAlpha = 1; ctx.setLineDash([]);
+  if (phase === 'title' || !game) { drawTitle(ts); return; }
+  ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H);
+  drawBoard(ts); drawHud(); drawOverlays(ts);
+}
+function loop(ts) {
+  const dt = Math.min(100, lastTs ? ts - lastTs : 16); lastTs = ts;
+  if (game) update(dt);
+  render(ts);
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener('resize', layout);
+window.addEventListener('blur', function () { if (phase === 'play') phase = 'paused'; });
+document.addEventListener('visibilitychange', function () { if (document.hidden && phase === 'play') phase = 'paused'; });
+const KEYDIR = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
+window.addEventListener('keydown', function (e) {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const code = e.code;
+  if (KEYDIR[code] !== undefined) { e.preventDefault(); onDir(KEYDIR[code]); return; }
+  if (code === 'Space' || code === 'Enter') { e.preventDefault(); if (!e.repeat) onConfirm(); return; }
+  if (code === 'KeyP' || code === 'Escape') { e.preventDefault(); if (!e.repeat) togglePause(); return; }
+  if (code === 'KeyM') { Sfx.init(); Sfx.toggle(); return; }
+  if (code === 'KeyR' && (phase === 'paused' || phase === 'final')) { newGame(); return; }
+  if (code === 'KeyQ' && phase === 'paused') { phase = 'title'; game = null; return; }
+  if (code === 'KeyF') {
+    try {
+      const el = document.documentElement;
+      if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
+      else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+    } catch (err) { /* ignore */ }
+  }
+});
+canvas.addEventListener('pointerdown', function () { canvas.focus(); Sfx.init(); if (phase === 'title') onConfirm(); });
+
+/* a small handle so the tests can drive the page */
+window.__ouro = {
+  get game() { return game; }, get phase() { return phase; },
+  newGame: newGame, onDir: onDir, onConfirm: onConfirm, update: update, render: function () { render(performance.now()); },
+  tickOnce: function () { if (phase === 'play') { const ev = game.step(); onEvents(ev); return ev; } return null; },
+  setPhase: function (p) { phase = p; phaseT = 0; }
+};
+
+layout();
+canvas.focus();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
