@@ -285,6 +285,7 @@ class Game {
     this.echoes.push(run);
     this.dayClear = cfg.dayBonus * (this.dayIndex + 1);
     this.score += this.dayScore + this.dayClear;
+    this.dayScore = 0;   // banked, so the HUD must not add it a second time
     this.history.push({ day: this.dayIndex + 1, attempts: this.attempt, eaten: run.count });
     const last = victory || this.dayIndex >= cfg.days - 1;
     if (last) { this.endGame(victory, false); return; }
@@ -349,16 +350,22 @@ const echoColor = function (i) { return PAL.echo[((i % PAL.echo.length) + PAL.ec
 const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
 
 let DPR = 1, W = 0, H = 0, hudH = 0, cs = 10, ox = 0, oy = 0, bw = 0, bh = 0, u = 1, bgCanvas = null;
-let game = null, phase = 'title', phaseT = 0, acc = 0, lastTs = 0, shakeT = 0, shakeMag = 0, frame = 0;
+let game = null, phase = 'title', phaseT = 0, acc = 0, lastTs = 0, shakeT = 0, shakeMag = 0, frame = 0, nowTs = 0;
 let particles = [], floaters = [], banner = null, tutorialShown = false;
 const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
 /* ---------- storage (may be unavailable, e.g. private windows) ---------- */
-function loadBest() { try { return JSON.parse(localStorage.getItem('ouroboros.best.v1')) || { score: 0, ratio: 0 }; } catch (e) { return { score: 0, ratio: 0 }; } }
+function loadBest() {
+  try {
+    const b = JSON.parse(localStorage.getItem('ouroboros.best.v1'));
+    if (b && typeof b === 'object') return { score: +b.score || 0, ratio: +b.ratio || 0 };
+  } catch (e) { /* storage blocked or garbled: start fresh */ }
+  return { score: 0, ratio: 0 };
+}
 function saveBest() {
   if (!game || !game.final) return;
   const b = loadBest(), f = game.final;
-  b.score = Math.max(b.score || 0, f.score); b.ratio = Math.max(b.ratio || 0, f.ratio);
+  b.score = Math.max(b.score, f.score); b.ratio = Math.max(b.ratio, f.ratio);
   try { localStorage.setItem('ouroboros.best.v1', JSON.stringify(b)); } catch (e) { /* ignore */ }
   best = b;
 }
@@ -369,7 +376,10 @@ const seedParam = (function () { const m = /[?&]seed=(\d+)/.exec(location.search
 const Sfx = (function () {
   let ac = null, master = null, muted = false;
   function init() {
-    if (ac) { if (ac.state === 'suspended') { try { ac.resume(); } catch (e) { /* ignore */ } } return; }
+    if (ac) {
+      if (ac.state === 'suspended') { try { const r = ac.resume(); if (r && r.catch) r.catch(function () { /* ignore */ }); } catch (e) { /* ignore */ } }
+      return;
+    }
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return;
@@ -430,7 +440,7 @@ function layout() {
   buildBg();
 }
 function buildBg() {
-  bgCanvas = document.createElement('canvas');
+  if (!bgCanvas) bgCanvas = document.createElement('canvas');   // reused, so dragging the window edge does not churn memory
   bgCanvas.width = Math.max(1, Math.round(bw * DPR)); bgCanvas.height = Math.max(1, Math.round(bh * DPR));
   const g = bgCanvas.getContext('2d');
   g.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -599,7 +609,8 @@ function floater(cx, cy, text, color) { floaters.push({ x: cx, y: cy, text: text
 function stepFx(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i]; p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
-    p.x += p.vx * dt / 1000; p.y += p.vy * dt / 1000; p.vx *= 0.96; p.vy *= 0.96;
+    const drag = Math.pow(0.96, dt / 16.667);   // the same decay at 60 Hz and 120 Hz
+    p.x += p.vx * dt / 1000; p.y += p.vy * dt / 1000; p.vx *= drag; p.vy *= drag;
   }
   for (let i = floaters.length - 1; i >= 0; i--) {
     const f = floaters[i]; f.life -= dt; if (f.life <= 0) { floaters.splice(i, 1); continue; } f.y -= dt * 0.03 * u;
@@ -716,7 +727,7 @@ function card(o) {
     const it = items[i]; y += it.size * (i === 0 ? 0.5 : 0.75);
     txt(it.s, cx, y, it.size, it.w, it.c, 'center'); y += it.size * (i === 0 ? 0.5 : 0.75) + (i === 0 ? 14 * u : it.size * 0.0) + (it.gap > it.size * 0.5 ? it.gap - it.size * 0.5 : 0);
   }
-  if (o.footer) txt(o.footer, cx, top + h - 28 * u, 14 * u, 700, PAL.you, 'center', 0.55 + 0.45 * Math.sin(frame / 14));
+  if (o.footer) txt(o.footer, cx, top + h - 28 * u, 14 * u, 700, PAL.you, 'center', 0.55 + 0.45 * Math.sin(nowTs / 230));
   ctx.restore();
 }
 function drawBanner(lines, alpha) {
@@ -735,7 +746,7 @@ function drawBanner(lines, alpha) {
   for (let i = 0; i < all.length; i++) {
     const it = all[i];
     txt(it.s, ox + bw / 2, top + 13 * u + lh * (i + 0.5), it.first ? size * 1.25 : size, it.first ? 800 : (it.last ? 700 : 500),
-      it.first ? PAL.text : (it.last ? PAL.you : PAL.dim), 'center', it.last && !it.first ? 0.6 + 0.4 * Math.sin(frame / 14) : 1);
+      it.first ? PAL.text : (it.last ? PAL.you : PAL.dim), 'center', it.last && !it.first ? 0.6 + 0.4 * Math.sin(nowTs / 230) : 1);
   }
   ctx.restore();
 }
@@ -787,21 +798,27 @@ function enterReady() {
   lines.push('Press an arrow key to begin');
   banner = lines;
 }
-function onDir(d) {
+const READY_GRACE = 250;   // ms after a day is set up before it accepts a move, so a held key or a double tap cannot skip the briefing
+let pending = null, pendingT = 0;   // R and Q on the pause card need a second press
+function pendingNow() { return pending && performance.now() - pendingT < 3000 ? pending : null; }
+function onDir(d, repeat) {
   Sfx.init();
-  if (phase === 'ready') { game.input(d); game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start(); }
-  else if (phase === 'play') game.input(d);
+  if (phase === 'ready') {
+    if (repeat || phaseT < READY_GRACE) return;
+    game.input(d); game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start();
+  } else if (phase === 'play') game.input(d);
 }
 function onConfirm() {
   Sfx.init();
   if (phase === 'title') newGame();
-  else if (phase === 'ready') { game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start(); }
+  else if (phase === 'ready') { if (phaseT >= READY_GRACE) { game.begin(); phase = 'play'; phaseT = 0; acc = 0; Sfx.start(); } }
   else if (phase === 'dead' && phaseT > 450) afterDeath();
   else if (phase === 'daydone' && phaseT > 600) { game.nextDay(); enterReady(); }
   else if (phase === 'final' && phaseT > 800) newGame();
-  else if (phase === 'paused') { phase = 'play'; acc = 0; }
+  else if (phase === 'paused') { pending = null; phase = 'play'; acc = 0; }
 }
 function togglePause() {
+  pending = null;
   if (phase === 'play') { phase = 'paused'; }
   else if (phase === 'paused') { phase = 'play'; acc = 0; }
 }
@@ -861,11 +878,21 @@ function drawOverlays(ts) {
   if (phase === 'ready') drawBanner(banner || [], clamp01(phaseT / 250));
   else if (phase === 'paused') {
     ctx.fillStyle = 'rgba(4,7,12,0.6)'; ctx.fillRect(0, 0, W, H);
-    card({ title: 'Paused', lines: [{ t: 'P or Space to continue', c: PAL.text }, { t: 'R restart the whole run     Q back to title     M sound     F fullscreen', size: 13 }], cy: H * 0.5 });
+    const pend = pendingNow();
+    card({
+      title: 'Paused',
+      lines: [
+        { t: 'P or Space to continue', c: PAL.text, after: 4 },
+        pend ? { t: pend === 'R' ? 'Press R again to throw away this run and start over' : 'Press Q again to leave this run and go back to the title', c: PAL.danger, size: 15, w: 700 }
+             : { t: 'R restart the run     Q back to title     M sound     F fullscreen', size: 13 }
+      ],
+      cy: H * 0.5
+    });
   } else if (phase === 'dead') {
     const d = g.death, k = clamp01((phaseT - 250) / 300);
     let why = d.reason === 'wall' ? 'You hit the wall.' : (d.reason === 'self' ? 'You bit yourself.' : 'Echo ' + (ROMAN[d.echo] || (d.echo + 1)) + ' caught you.');
-    drawBanner([why, g.rewinds > 0 ? 'The day rewinds. ' + g.rewinds + (g.rewinds === 1 ? ' rewind' : ' rewinds') + ' left.' : 'No rewinds left. This is the end of the run.'], k);
+    const left = g.rewinds - 1;   // this death spends one
+    drawBanner([why, g.rewinds > 0 ? 'The day rewinds. ' + left + (left === 1 ? ' rewind' : ' rewinds') + ' left after this.' : 'No rewinds left. This is the end of the run.'], k);
   } else if (phase === 'rewind') {
     const k = clamp01(phaseT / 750);
     ctx.save(); ctx.globalAlpha = 0.5 * (1 - k); ctx.fillStyle = '#9fd8ff';
@@ -911,38 +938,53 @@ function drawOverlays(ts) {
 
 /* ---------- main loop ---------- */
 function render(ts) {
-  frame++;
+  frame++; nowTs = ts;
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   ctx.globalAlpha = 1; ctx.setLineDash([]);
-  if (phase === 'title' || !game) { drawTitle(ts); return; }
-  ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H);
-  drawBoard(ts); drawHud(); drawOverlays(ts);
+  if (phase === 'title' || !game) drawTitle(ts);
+  else {
+    ctx.fillStyle = PAL.bg; ctx.fillRect(0, 0, W, H);
+    drawBoard(ts); drawHud(); drawOverlays(ts);
+  }
+  if (Sfx.isMuted()) txt('sound off   M to turn on', W - 14 * u, H - 12 * u, 12 * u, 600, PAL.dim, 'right', 0.85);
 }
 function loop(ts) {
+  requestAnimationFrame(loop);   // schedule first, so one bad frame can never stop the game
   const dt = Math.min(100, lastTs ? ts - lastTs : 16); lastTs = ts;
-  if (game) update(dt);
-  render(ts);
-  requestAnimationFrame(loop);
+  try { if (game) update(dt); render(ts); } catch (err) { if (window.console) console.error(err); }
 }
 
-window.addEventListener('resize', layout);
+let resizeTimer = 0;
+window.addEventListener('resize', function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(layout, 60); });
 window.addEventListener('blur', function () { if (phase === 'play') phase = 'paused'; });
 document.addEventListener('visibilitychange', function () { if (document.hidden && phase === 'play') phase = 'paused'; });
 const KEYDIR = { ArrowUp: 0, KeyW: 0, ArrowRight: 1, KeyD: 1, ArrowDown: 2, KeyS: 2, ArrowLeft: 3, KeyA: 3 };
+const LETTERDIR = { w: 0, d: 1, s: 2, a: 3 };   // so the labelled W A S D keys work on other keyboard layouts too
 window.addEventListener('keydown', function (e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const code = e.code;
-  if (KEYDIR[code] !== undefined) { e.preventDefault(); onDir(KEYDIR[code]); return; }
-  if (code === 'Space' || code === 'Enter') { e.preventDefault(); if (!e.repeat) onConfirm(); return; }
+  let dir = KEYDIR[code];
+  if (dir === undefined && e.key && e.key.length === 1) dir = LETTERDIR[e.key.toLowerCase()];
+  if (dir !== undefined) { e.preventDefault(); onDir(dir, e.repeat); return; }
+  if (code === 'Space' || code === 'Enter' || code === 'NumpadEnter') { e.preventDefault(); if (!e.repeat) onConfirm(); return; }
   if (code === 'KeyP' || code === 'Escape') { e.preventDefault(); if (!e.repeat) togglePause(); return; }
   if (code === 'KeyM') { Sfx.init(); Sfx.toggle(); return; }
-  if (code === 'KeyR' && (phase === 'paused' || phase === 'final')) { newGame(); return; }
-  if (code === 'KeyQ' && phase === 'paused') { phase = 'title'; game = null; return; }
+  if (code === 'KeyR' && phase === 'final') { newGame(); return; }
+  if ((code === 'KeyR' || code === 'KeyQ') && phase === 'paused') {
+    if (e.repeat) return;
+    const k = code === 'KeyR' ? 'R' : 'Q';
+    if (pendingNow() === k) { pending = null; if (k === 'R') newGame(); else { phase = 'title'; game = null; } }
+    else { pending = k; pendingT = performance.now(); }
+    return;
+  }
   if (code === 'KeyF') {
+    if (phase === 'play') { phase = 'paused'; }   // the window is about to change size: do not let the snake carry on unseen
     try {
       const el = document.documentElement;
-      if (document.fullscreenElement || document.webkitFullscreenElement) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); }
-      else (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      const r = (document.fullscreenElement || document.webkitFullscreenElement)
+        ? (document.exitFullscreen || document.webkitExitFullscreen).call(document)
+        : (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      if (r && r.catch) r.catch(function () { /* ignore */ });
     } catch (err) { /* ignore */ }
   }
 });
@@ -950,7 +992,7 @@ canvas.addEventListener('pointerdown', function () { canvas.focus(); Sfx.init();
 
 /* a small handle so the tests can drive the page */
 window.__ouro = {
-  get game() { return game; }, get phase() { return phase; },
+  get game() { return game; }, get phase() { return phase; }, get frame() { return frame; },
   newGame: newGame, onDir: onDir, onConfirm: onConfirm, update: update, render: function () { render(performance.now()); },
   tickOnce: function () { if (phase === 'play') { const ev = game.step(); onEvents(ev); return ev; } return null; },
   setPhase: function (p) { phase = p; phaseT = 0; }

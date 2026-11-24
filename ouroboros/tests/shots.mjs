@@ -66,7 +66,7 @@ while (guard++ < 12) {
   phase = await page.evaluate(() => window.__ouro.phase);
   if (phase === 'dead') { await shot('x-dead'); await page.evaluate(() => window.__ouro.update(1400)); }
   else if (phase === 'rewind') { await page.evaluate(() => window.__ouro.update(800)); }
-  else if (phase === 'ready') { await page.keyboard.press('ArrowUp'); await page.evaluate(() => window.__run(100000)); }
+  else if (phase === 'ready') { await page.waitForTimeout(320); await page.keyboard.press('ArrowUp'); await page.evaluate(() => window.__run(100000)); }
   else break;
 }
 phase = await page.evaluate(() => window.__ouro.phase);
@@ -88,7 +88,7 @@ for (let day = 2; day < 6 && guard++ < 60; ) {
   phase = await page.evaluate(() => window.__ouro.phase);
   if (phase === 'dead') await page.evaluate(() => window.__ouro.update(1400));
   else if (phase === 'rewind') await page.evaluate(() => window.__ouro.update(800));
-  else if (phase === 'ready') { await page.keyboard.press('ArrowUp'); await page.evaluate(() => window.__run(100000)); }
+  else if (phase === 'ready') { await page.waitForTimeout(320); await page.keyboard.press('ArrowUp'); await page.evaluate(() => window.__run(100000)); }
   else if (phase === 'daydone') { await page.evaluate(() => window.__ouro.update(1000)); await page.keyboard.press('Space'); await page.evaluate(() => window.__ouro.update(700)); day++; }
   else if (phase === 'final') break;
   else if (phase === 'play') await page.evaluate(() => window.__run(100000));

@@ -212,7 +212,17 @@ test('score and harvest accounting', () => {
   if (g.status === 'dayDone' || g.status === 'final') {
     assert.equal(g.harvested(), g.echoes.reduce((a, e) => a + e.count, 0));
     assert.ok(g.score > 0);
+    assert.equal(g.dayScore, 0, 'a finished day is banked once, so the HUD (score + dayScore) cannot count it twice');
   }
+});
+
+test('running out of rewinds discards the day you died in', () => {
+  const g = new Game(5, { rewinds: 0 }); g.begin();
+  for (let i = 0; i < 400 && g.status === 'play'; i++) { const d = pickMove(g); if (d !== null) g.input(d); g.step(); if (g.run.count >= 2) break; }
+  const ate = g.run.count; g.input((g.run.dir + 1) & 3);
+  g.status = 'dead'; g.death = { reason: 'wall', x: 0, y: 0, echo: -1, t: g.run.t };
+  assert.equal(g.afterDeath(), false);
+  assert.equal(g.status, 'final'); assert.equal(g.final.harvested, 0, 'fruit from the lost day (' + ate + ') is not banked'); assert.equal(g.dayScore, 0);
 });
 
 console.log(passed + ' passed' + (process.exitCode ? ', with failures' : ''));

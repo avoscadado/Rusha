@@ -1,0 +1,4 @@
+{"waveSize":9,"life":34,"lifeJitter":6,"cols":52,"rows":32} eaten 32.9 of 82.1 share 40%
+{"waveSize":12,"life":34,"lifeJitter":6,"cols":52,"rows":32} eaten 37.0 of 108.0 share 34%
+{"waveSize":9,"life":34,"lifeJitter":6,"cols":60,"rows":38} eaten 29.3 of 82.1 share 36%
+{"waveSize":12,"life":34,"lifeJitter":6,"cols":60,"rows":38} eaten 33.4 of 109.5 share 30%
