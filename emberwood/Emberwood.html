@@ -1,0 +1,1210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emberwood</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0c0e0b; overflow: hidden; }
+  canvas { display: block; outline: none; }
+</style>
+</head>
+<body>
+<canvas id="c" tabindex="0"></canvas>
+<script>
+/*
+  EMBERWOOD
+  Snake, in a forest that is on fire. Your trail is the firebreak.
+
+  Everything is in this one file: no libraries, no network, no assets.
+  Double-click the file to play in your browser.
+*/
+(function () {
+'use strict';
+
+// ---------------------------------------------------------------- constants
+const COLS = 40, ROWS = 28, N = COLS * ROWS;
+const STEP = 25;                 // simulation step in ms (40 steps per second)
+const FIRE_EVERY = 10;           // fire spreads every 10 steps (250 ms)
+const GROUND = 0, TREE = 1, FIRE = 2, ASH = 3, ROCK = 4, WATER = 5, MEADOW = 6;
+const DIRV = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
+const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+// wind directions, clockwise from east (the direction the wind blows toward)
+const WIND = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]
+  .map(v => { const l = Math.hypot(v[0], v[1]); return [v[0] / l, v[1] / l]; });
+const START_LEN = 4, FRUIT_GROW = 2, MIN_STRIKE_DIST = 12, DEW_RADIUS = 6;
+const sec = s => Math.round(s * 1000 / STEP);
+
+// ---------------------------------------------------------------- random
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+let rand = mulberry32((Date.now() ^ 0x9e3779b9) >>> 0);
+const ri = n => Math.floor(rand() * n);
+
+// ---------------------------------------------------------------- seasons
+// spread: chance per fire step that fire jumps to a neighbouring tree (before wind)
+// burn: fire steps a tree burns for; burst: chance a strike also lights each neighbour
+// spot: chance per burning tree per fire step of an ember jumping 2-3 cells downwind
+// road / brush: steps per move on open ground / when pushing into trees
+// target: percentage of the forest that must survive the season
+const LEVELS = [
+  { name: 'First Spark', blurb: 'A calm day. Three strikes. Learn how fire moves.',
+    seed: 101, meadows: 6, lakes: 1, rocks: 4, river: 0, strikes: 3, pairs: 0, window: 40, warn: 3.0,
+    wind: 0.15, shift: 0, spread: 0.052, burn: 12, burst: 0.3, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 74 },
+  { name: 'Kindling', blurb: 'A light breeze. Fire runs faster downwind.',
+    seed: 202, meadows: 5, lakes: 2, rocks: 4, river: 0, strikes: 4, pairs: 0, window: 48, warn: 2.8,
+    wind: 0.3, shift: 0, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 0, target: 70 },
+  { name: 'The River', blurb: 'Water stops fire, and it stops you. Cross at the fords. The wind will turn.',
+    seed: 303, meadows: 4, lakes: 0, rocks: 3, river: 1, strikes: 5, pairs: 0, window: 54, warn: 2.6,
+    wind: 0.32, shift: 24, spread: 0.052, burn: 12, burst: 0.4, spot: 0, road: 5, brush: 7, fruit: 3, dew: 1, target: 66 },
+  { name: 'Gusts', blurb: 'Strong wind carries embers over thin firebreaks. Cut wider downwind.',
+    seed: 404, meadows: 4, lakes: 1, rocks: 4, river: 0, strikes: 6, pairs: 0, window: 58, warn: 2.5,
+    wind: 0.55, shift: 18, spread: 0.05, burn: 12, burst: 0.4, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 64 },
+  { name: 'Twin Bolts', blurb: 'Lightning now strikes in pairs. Choose which fire to fight first.',
+    seed: 505, meadows: 4, lakes: 2, rocks: 5, river: 2, strikes: 8, pairs: 1, window: 60, warn: 2.4,
+    wind: 0.4, shift: 22, spread: 0.052, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 3, dew: 1, target: 60 },
+  { name: 'Old Growth', blurb: 'Deep forest with no meadows to slow the fire.',
+    seed: 606, meadows: 0, lakes: 1, rocks: 7, river: 0, strikes: 7, pairs: 0, window: 64, warn: 2.3,
+    wind: 0.4, shift: 20, spread: 0.05, burn: 12, burst: 0.5, spot: 0.0015, road: 4, brush: 6, fruit: 4, dew: 1, target: 56 },
+  { name: 'Dry Season', blurb: 'Everything is tinder. Warnings come later.',
+    seed: 707, meadows: 3, lakes: 0, rocks: 3, river: 1, strikes: 8, pairs: 1, window: 64, warn: 2.1,
+    wind: 0.45, shift: 18, spread: 0.056, burn: 12, burst: 0.55, spot: 0.002, road: 4, brush: 6, fruit: 4, dew: 1, target: 46 },
+  { name: 'Squall', blurb: 'A gale that keeps changing its mind.',
+    seed: 808, meadows: 4, lakes: 2, rocks: 4, river: 0, strikes: 8, pairs: 0, window: 68, warn: 2.0,
+    wind: 0.7, shift: 13, spread: 0.056, burn: 12, burst: 0.5, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 46 },
+  { name: 'Tinderbox', blurb: 'More strikes than you can reach. Save what you can.',
+    seed: 909, meadows: 3, lakes: 1, rocks: 5, river: 2, strikes: 10, pairs: 1, window: 70, warn: 1.9,
+    wind: 0.5, shift: 16, spread: 0.058, burn: 12, burst: 0.6, spot: 0.0025, road: 4, brush: 6, fruit: 4, dew: 1, target: 40 },
+  { name: 'Crown Fire', blurb: 'The last storm of the year.',
+    seed: 1010, meadows: 2, lakes: 1, rocks: 5, river: 1, strikes: 12, pairs: 1, window: 75, warn: 1.8,
+    wind: 0.6, shift: 15, spread: 0.06, burn: 12, burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: 32 },
+];
+
+function cfgFor(i) {
+  if (i < LEVELS.length) return LEVELS[i];
+  const e = i - LEVELS.length + 1, b = LEVELS[i % LEVELS.length];
+  return Object.assign({}, b, {
+    name: 'Endless ' + e + ': ' + b.name, blurb: 'The storms keep coming.',
+    seed: b.seed * 31 + e * 7919, strikes: 12 + e, pairs: 1, window: 75, warn: Math.max(1.4, 1.8 - 0.05 * e),
+    wind: Math.min(0.85, 0.55 + 0.04 * e), shift: 14, spread: Math.min(0.075, 0.06 + 0.002 * e), burn: 12,
+    burst: 0.6, spot: 0.003, road: 4, brush: 6, fruit: 4, dew: 1, target: Math.max(20, 34 - 2 * e),
+  });
+}
+
+// ---------------------------------------------------------------- state
+function loadBest() { try { return parseInt(localStorage.getItem('emberwood.best') || '0', 10) || 0; } catch (e) { return 0; } }
+function saveBest() { try { localStorage.setItem('emberwood.best', String(S.best)); } catch (e) { /* private mode */ } }
+
+const S = {
+  mode: 'title', modeT: 0,
+  season: 0, endless: false, score: 0, lives: 3, best: loadBest(), seasonsCleared: 0, lifeGained: false,
+  cfg: LEVELS[0],
+  T: new Uint8Array(N), burn: new Uint8Array(N), V: new Uint8Array(N),
+  snake: [], dir: 'right', queue: [], grow: 0, moveCD: 0, spawn: { x: 6, y: 14 },
+  st: 0, acc: 0,
+  schedule: [], strikes: [],
+  wind: 0, windStr: 0, windNext: -1, windShiftAt: -1,
+  fruits: [], fruitQ: [], dew: null, dewAt: -1,
+  trees0: 1, burned: 0, carved: 0, fireIdx: [], fireCount: 0,
+  eaten: 0, groundedN: 0, endT: 0, result: null, deathReason: '',
+  dirty: true, noSnake: false,
+  demoAcc: 0, demoClock: 0, demoNext: 0,
+  fx: { p: [], txt: [], bolts: [], flash: 0, shake: 0 },
+};
+
+// ---------------------------------------------------------------- map generation
+function generate(cfg) {
+  const r = mulberry32(cfg.seed);
+  const T = S.T;
+  T.fill(TREE); S.burn.fill(0);
+  for (let i = 0; i < N; i++) S.V[i] = Math.floor(r() * 256);
+  const inb = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS;
+  const blob = (cx, cy, rad, type) => {
+    for (let y = Math.floor(cy - rad - 2); y <= cy + rad + 2; y++)
+      for (let x = Math.floor(cx - rad - 2); x <= cx + rad + 2; x++) {
+        if (!inb(x, y)) continue;
+        const d = Math.hypot(x - cx, (y - cy) * 1.15);
+        if (d < rad + (r() - 0.5) * 1.4) T[y * COLS + x] = type;
+      }
+  };
+  for (let k = 0; k < cfg.meadows; k++) blob(2 + r() * 36, 2 + r() * 24, 1.6 + r() * 2.2, MEADOW);
+  for (let k = 0; k < cfg.lakes; k++) blob(4 + r() * 32, 3 + r() * 22, 1.8 + r() * 1.8, WATER);
+  for (let k = 0; k < cfg.rocks; k++) {
+    let x = Math.floor(r() * COLS), y = Math.floor(r() * ROWS);
+    const len = 5 + Math.floor(r() * 10);
+    for (let s = 0; s < len; s++) {
+      if (inb(x, y)) T[y * COLS + x] = ROCK;
+      const d = N4[Math.floor(r() * 4)]; x += d[0]; y += d[1];
+    }
+  }
+  if (cfg.river === 1) {            // north to south
+    let x = 13 + Math.floor(r() * 14);
+    const fords = [4 + Math.floor(r() * 4), 12 + Math.floor(r() * 4), 20 + Math.floor(r() * 4)];
+    for (let y = 0; y < ROWS; y++) {
+      const ford = fords.some(f => y === f || y === f + 1);
+      for (let w = 0; w < 2; w++) T[y * COLS + x + w] = ford ? MEADOW : WATER;
+      if (r() < 0.35 && y < ROWS - 1) {
+        const nx = Math.max(12, Math.min(COLS - 4, x + (r() < 0.5 ? -1 : 1)));
+        if (nx !== x) { const join = nx > x ? x + 2 : x - 1; if (inb(join, y)) T[y * COLS + join] = ford ? MEADOW : WATER; }
+        x = nx;
+      }
+    }
+  } else if (cfg.river === 2) {     // west to east
+    let y = 6 + Math.floor(r() * 4);
+    const fords = [8 + Math.floor(r() * 5), 19 + Math.floor(r() * 5), 30 + Math.floor(r() * 5)];
+    for (let x = 0; x < COLS; x++) {
+      const ford = fords.some(f => x === f || x === f + 1);
+      for (let w = 0; w < 2; w++) T[(y + w) * COLS + x] = ford ? MEADOW : WATER;
+      if (r() < 0.3 && x < COLS - 1) {
+        const ny = Math.max(4, Math.min(ROWS - 4, y + (r() < 0.5 ? -1 : 1)));
+        if (ny !== y) { const join = ny > y ? y + 2 : y - 1; if (inb(x, join)) T[join * COLS + x] = ford ? MEADOW : WATER; }
+        y = ny;
+      }
+    }
+  }
+  // the glade the snake starts in
+  const sx = S.spawn.x, sy = S.spawn.y;
+  for (let y = sy - 2; y <= sy + 2; y++) for (let x = 1; x <= sx + 3; x++) T[y * COLS + x] = MEADOW;
+  // anything you cannot reach becomes rock
+  const seen = new Uint8Array(N), q = [sy * COLS + sx]; seen[q[0]] = 1;
+  while (q.length) {
+    const i = q.pop(), x = i % COLS, y = (i / COLS) | 0;
+    for (const d of N4) {
+      const nx = x + d[0], ny = y + d[1]; if (!inb(nx, ny)) continue;
+      const j = ny * COLS + nx;
+      if (seen[j] || T[j] === ROCK || T[j] === WATER) continue;
+      seen[j] = 1; q.push(j);
+    }
+  }
+  let trees = 0;
+  for (let i = 0; i < N; i++) {
+    if (!seen[i] && T[i] !== ROCK && T[i] !== WATER) T[i] = ROCK;
+    if (T[i] === TREE) trees++;
+  }
+  S.trees0 = trees;
+  S.dirty = true;
+}
+
+// ---------------------------------------------------------------- season flow
+function setMode(m) { S.mode = m; S.modeT = 0; }
+
+function startGame() {
+  S.score = 0; S.lives = 3; S.seasonsCleared = 0; S.endless = false;
+  startSeason(0);
+  sfx('start');
+}
+
+function startSeason(i) {
+  S.season = i; S.cfg = cfgFor(i);
+  generate(S.cfg);
+  S.burned = 0; S.carved = 0; S.st = 0; S.acc = 0; S.eaten = 0; S.groundedN = 0; S.endT = 0;
+  S.result = null; S.lifeGained = false; S.seasonScore0 = S.score;
+  S.fireIdx = []; S.fireCount = 0;
+  resetSnake();
+  S.fruits = []; S.fruitQ = [];
+  for (let k = 0; k < S.cfg.fruit; k++) spawnFruit();
+  S.dew = null; S.dewAt = S.cfg.dew ? sec(S.cfg.window * 0.45) : -1;
+  buildSchedule();
+  S.strikes = [];
+  S.wind = ri(8); S.windStr = S.cfg.wind; S.windNext = -1;
+  S.windShiftAt = S.cfg.shift ? sec(S.cfg.shift) : -1;
+  S.fx.p.length = 0; S.fx.txt.length = 0; S.fx.bolts.length = 0;
+  setMode('ready');
+}
+
+function resetSnake() {
+  S.snake = [];
+  for (let k = 0; k < START_LEN; k++) S.snake.push({ x: S.spawn.x - k, y: S.spawn.y });
+  S.dir = 'right'; S.queue = []; S.grow = 0; S.moveCD = 1;
+}
+
+function buildSchedule() {
+  const cfg = S.cfg;
+  const groups = cfg.pairs ? Math.ceil(cfg.strikes / 2) : cfg.strikes;
+  const first = sec(3.5), span = sec(cfg.window) - first;
+  let left = cfg.strikes;
+  S.schedule = [];
+  for (let g = 0; g < groups; g++) {
+    const land = first + Math.round(span * (g + 0.15 + 0.7 * rand()) / groups);
+    const count = cfg.pairs ? Math.min(2, left) : 1; left -= count;
+    S.schedule.push({ warnAt: Math.max(1, land - sec(cfg.warn)), landAt: land, count, started: false, done: false });
+  }
+}
+
+function strikesLeft() { let n = 0; for (const g of S.schedule) if (!g.done) n += g.count; return n; }
+
+function endSeason(pass) {
+  const saved = savedPct();
+  const res = { pass, saved, fruit: S.eaten, grounded: S.groundedN, length: S.snake.length, points: 0, lifeGained: false };
+  if (pass) {
+    res.forestPts = Math.round(saved) * 10;
+    res.lengthPts = S.snake.length * 5;
+    res.bonus = 250;
+    res.points = res.forestPts + res.lengthPts + res.bonus;
+    S.score += res.points;
+    S.seasonsCleared++;
+    if (S.seasonsCleared % 3 === 0 && S.lives < 5) { S.lives++; res.lifeGained = true; }
+    sfx('clear');
+  } else {
+    S.lives--;
+    sfx('fail');
+  }
+  if (S.score > S.best) { S.best = S.score; saveBest(); }
+  S.result = res;
+  setMode('tally');
+}
+
+function afterTally() {
+  const r = S.result;
+  if (!r.pass && S.lives <= 0) { setMode('gameover'); return; }
+  if (!r.pass) { startSeason(S.season); return; }
+  if (S.season === LEVELS.length - 1 && !S.endless) { setMode('victory'); return; }
+  startSeason(S.season + 1);
+}
+
+function die(reason) {
+  S.deathReason = reason;
+  setMode('dying');
+  sfx('death');
+  S.fx.shake = 10;
+  for (const s of S.snake) for (let k = 0; k < 3; k++)
+    particle({ x: s.x + 0.5, y: s.y + 0.5, vx: (rand() - 0.5) * 5, vy: (rand() - 0.5) * 5, life: 900, size: 0.18, col: k ? '#bff7ee' : '#ff9b5a', kind: 'spark' });
+}
+
+function afterDeath() {
+  S.lives--;
+  if (S.score > S.best) { S.best = S.score; saveBest(); }
+  if (S.lives <= 0) { setMode('gameover'); return; }
+  resetSnake();
+  setMode('ready');
+}
+
+const DEATH_TEXT = {
+  fire: 'You slithered into the fire.', rock: 'You hit a rock.', water: 'You swam into the river. Snakes in this wood cannot swim.',
+  edge: 'You ran off the edge of the wood.', self: 'You bit your own tail.',
+};
+
+// ---------------------------------------------------------------- simulation
+function step() {
+  S.st++;
+  if (!S.noSnake && --S.moveCD <= 0) { moveSnake(); if (S.mode !== 'play') return; }
+  if (S.st % FIRE_EVERY === 0) fireStep();
+  strikesUpdate();
+  windUpdate();
+  fruitUpdate();
+  dewUpdate();
+  checkEnd();
+}
+
+function into(h, d, nb) { if (!nb) return false; const v = DIRV[d]; return h.x + v[0] === nb.x && h.y + v[1] === nb.y; }
+function segAt(x, y) { const sn = S.snake; for (let k = 0; k < sn.length; k++) if (sn[k].x === x && sn[k].y === y) return k; return -1; }
+
+function moveSnake() {
+  const h = S.snake[0], neck = S.snake[1];
+  while (S.queue.length) { const d = S.queue.shift(); if (!into(h, d, neck)) { S.dir = d; break; } }
+  if (into(h, S.dir, neck)) S.dir = OPP[S.dir];
+  const v = DIRV[S.dir], nx = h.x + v[0], ny = h.y + v[1];
+  if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) return die('edge');
+  const i = ny * COLS + nx, c = S.T[i];
+  if (c === ROCK) return die('rock');
+  if (c === WATER) return die('water');
+  if (c === FIRE) return die('fire');
+  const k = segAt(nx, ny);
+  if (k >= 0 && !(k === S.snake.length - 1 && S.grow === 0)) return die('self');
+  S.snake.unshift({ x: nx, y: ny });
+  if (S.grow > 0) S.grow--; else S.snake.pop();
+  let brush = false;
+  if (c === TREE) {
+    S.T[i] = GROUND; S.carved++; brush = true; S.dirty = true;
+    for (let n = 0; n < 3; n++)
+      particle({ x: nx + 0.5, y: ny + 0.5, vx: (rand() - 0.5) * 3, vy: (rand() - 0.5) * 3, life: 500, size: 0.12, col: rand() < 0.5 ? '#4f8a42' : '#6ea653', kind: 'leaf' });
+    sfx('rustle');
+  }
+  const f = S.fruits.findIndex(o => o.x === nx && o.y === ny);
+  if (f >= 0) {
+    S.fruits.splice(f, 1); S.grow += FRUIT_GROW; S.eaten++; S.score += 50;
+    S.fruitQ.push(S.st + sec(2 + rand() * 3));
+    text(nx + 0.5, ny - 0.2, '+50', '#ffd27a');
+    for (let n = 0; n < 8; n++) particle({ x: nx + 0.5, y: ny + 0.5, vx: (rand() - 0.5) * 6, vy: (rand() - 0.5) * 6, life: 500, size: 0.1, col: '#ffcf6a', kind: 'spark' });
+    sfx('eat');
+  }
+  if (S.dew && S.dew.x === nx && S.dew.y === ny) douse(nx, ny);
+  S.moveCD = brush ? S.cfg.brush : S.cfg.road;
+}
+
+function ignite(j) {
+  S.T[j] = FIRE; S.burn[j] = S.cfg.burn + ri(5); S.burned++;
+  const x = j % COLS, y = (j / COLS) | 0;
+  const f = S.fruits.findIndex(o => o.x === x && o.y === y);
+  if (f >= 0) { S.fruits.splice(f, 1); S.fruitQ.push(S.st + sec(3 + rand() * 3)); }
+  if (S.dew && S.dew.x === x && S.dew.y === y) S.dew = null;
+}
+
+function fireStep() {
+  const T = S.T, B = S.burn, cfg = S.cfg, w = WIND[S.wind], ws = S.windStr;
+  const ign = [], list = [];
+  for (let i = 0; i < N; i++) {
+    if (T[i] !== FIRE) continue;
+    const x = i % COLS, y = (i / COLS) | 0;
+    for (let k = 0; k < 4; k++) {
+      const dx = N4[k][0], dy = N4[k][1], nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+      const j = ny * COLS + nx;
+      if (T[j] !== TREE) continue;
+      const f = Math.max(0.12, 1 + 1.8 * ws * (dx * w[0] + dy * w[1]));
+      if (rand() < cfg.spread * f) ign.push(j);
+    }
+    if (cfg.spot > 0 && ws > 0.2 && rand() < cfg.spot) {
+      const d = 2 + ri(2), tx = Math.round(x + w[0] * d), ty = Math.round(y + w[1] * d);
+      if (tx >= 0 && ty >= 0 && tx < COLS && ty < ROWS && T[ty * COLS + tx] === TREE) {
+        ign.push(ty * COLS + tx);
+        for (let n = 0; n < 4; n++) particle({ x: x + 0.5, y: y + 0.5, vx: (tx - x) * (1.2 + rand() * 0.5), vy: (ty - y) * (1.2 + rand() * 0.5) - 0.5, life: 700, size: 0.09, col: '#ffb347', kind: 'spark' });
+      }
+    }
+    if (--B[i] <= 0) T[i] = ASH; else list.push(i);
+  }
+  for (const j of ign) if (T[j] === TREE) { ignite(j); list.push(j); }
+  S.fireIdx = list; S.fireCount = list.length; S.dirty = true;
+}
+
+function pickTarget() {
+  const h = S.snake[0];
+  let best = null, bs = -1;
+  for (let a = 0; a < 500; a++) {
+    if (best && a > 80) break;
+    const x = ri(COLS), y = ri(ROWS), i = y * COLS + x;
+    if (S.T[i] !== TREE) continue;
+    if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < MIN_STRIKE_DIST) continue;
+    if (S.strikes.some(s => Math.abs(s.x - x) + Math.abs(s.y - y) < 6)) continue;
+    let sc = rand() * 3;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx >= 0 && yy >= 0 && xx < COLS && yy < ROWS && S.T[yy * COLS + xx] === TREE) sc++;
+    }
+    if (sc > bs) { bs = sc; best = { x, y }; }
+  }
+  return best;
+}
+
+function strikesUpdate() {
+  for (const g of S.schedule) {
+    if (!g.started && S.st >= g.warnAt) {
+      g.started = true;
+      for (let c = 0; c < g.count; c++) { const t = pickTarget(); if (t) S.strikes.push({ x: t.x, y: t.y, warnAt: S.st, landAt: g.landAt }); }
+      sfx('warn');
+    }
+  }
+  for (let k = S.strikes.length - 1; k >= 0; k--) {
+    const s = S.strikes[k];
+    if (S.st >= s.landAt) { S.strikes.splice(k, 1); land(s); }
+  }
+  for (const g of S.schedule) if (g.started && !g.done && S.st >= g.landAt) g.done = true;
+}
+
+function land(s) {
+  const i = s.y * COLS + s.x;
+  bolt(s.x, s.y);
+  if (S.T[i] === TREE) {
+    ignite(i); S.fireIdx.push(i); S.fireCount++;
+    for (const d of N4) {
+      const nx = s.x + d[0], ny = s.y + d[1];
+      if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+      const j = ny * COLS + nx;
+      if (S.T[j] === TREE && rand() < S.cfg.burst) { ignite(j); S.fireIdx.push(j); S.fireCount++; }
+    }
+  } else if (S.T[i] === GROUND) {
+    S.score += 30; S.groundedN++;
+    text(s.x + 0.5, s.y - 0.3, 'Grounded +30', '#bfe6ff');
+    sfx('ground');
+  }
+  S.dirty = true;
+}
+
+function windUpdate() {
+  const cfg = S.cfg;
+  if (!cfg.shift || S.windShiftAt < 0) return;
+  if (S.windNext < 0 && S.st >= S.windShiftAt - sec(3)) {
+    const turn = (rand() < 0.5 ? -1 : 1) * (rand() < 0.6 ? 1 : 2);
+    S.windNext = (S.wind + turn + 8) % 8;
+  }
+  if (S.st >= S.windShiftAt) {
+    S.wind = S.windNext; S.windNext = -1;
+    S.windShiftAt = S.st + Math.round(sec(cfg.shift) * (0.8 + 0.4 * rand()));
+    sfx('wind');
+  }
+}
+
+function spawnFruit() {
+  const h = S.snake[0];
+  for (let a = 0; a < 400; a++) {
+    const x = ri(COLS), y = ri(ROWS);
+    if (S.T[y * COLS + x] !== TREE) continue;
+    if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < 6) continue;
+    if (S.fruits.some(f => f.x === x && f.y === y)) continue;
+    if (S.dew && S.dew.x === x && S.dew.y === y) continue;
+    S.fruits.push({ x, y, ph: rand() * 6.28 });
+    return true;
+  }
+  return false;
+}
+
+function fruitUpdate() {
+  for (let k = S.fruitQ.length - 1; k >= 0; k--) {
+    if (S.st >= S.fruitQ[k]) { S.fruitQ.splice(k, 1); if (!spawnFruit()) S.fruitQ.push(S.st + sec(3)); }
+  }
+}
+
+function dewUpdate() {
+  if (S.dewAt > 0 && S.st >= S.dewAt && !S.dew) {
+    S.dewAt = -1;
+    const h = S.snake[0];
+    for (let a = 0; a < 400; a++) {
+      const x = ri(COLS), y = ri(ROWS);
+      if (S.T[y * COLS + x] !== TREE) continue;
+      if (h && Math.abs(x - h.x) + Math.abs(y - h.y) < 8) continue;
+      if (S.fruits.some(f => f.x === x && f.y === y)) continue;
+      S.dew = { x, y, until: S.st + sec(20) };
+      sfx('dew');
+      break;
+    }
+  }
+  if (S.dew && S.st > S.dew.until) S.dew = null;
+}
+
+function douse(cx, cy) {
+  S.dew = null;
+  let n = 0;
+  for (let y = cy - DEW_RADIUS; y <= cy + DEW_RADIUS; y++) for (let x = cx - DEW_RADIUS; x <= cx + DEW_RADIUS; x++) {
+    if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
+    if (Math.hypot(x - cx, y - cy) > DEW_RADIUS + 0.3) continue;
+    const i = y * COLS + x;
+    if (S.T[i] === FIRE) { S.T[i] = ASH; n++; }
+  }
+  S.fireIdx = S.fireIdx.filter(i => S.T[i] === FIRE); S.fireCount = S.fireIdx.length;
+  S.score += 40;
+  text(cx + 0.5, cy - 0.3, n ? 'Rain! ' + n + ' fires out' : 'Rain +40', '#a8dcff');
+  for (let k = 0; k < 90; k++) {
+    const a = rand() * 6.28, rr = rand() * DEW_RADIUS;
+    particle({ x: cx + 0.5 + Math.cos(a) * rr, y: cy + 0.5 + Math.sin(a) * rr - 1.5, vx: 0.4, vy: 7 + rand() * 4, life: 380 + rand() * 300, size: 0.06, col: '#bfe3ff', kind: 'rain' });
+  }
+  S.dirty = true;
+  sfx('rain');
+}
+
+function savedPct() { return 100 * (1 - S.burned / Math.max(1, S.trees0)); }
+
+function checkEnd() {
+  if (S.mode !== 'play') return;
+  if (savedPct() < S.cfg.target) { endSeason(false); return; }
+  const pending = strikesLeft() > 0 || S.strikes.length > 0;
+  if (!pending && S.fireCount === 0) {
+    if (++S.endT > sec(1)) endSeason(true);
+  } else S.endT = 0;
+  // safety valve: a long-burning season ends in rain
+  if (S.st > sec(S.cfg.window + 150)) {
+    for (let i = 0; i < N; i++) if (S.T[i] === FIRE) S.T[i] = ASH;
+    S.fireIdx = []; S.fireCount = 0; S.dirty = true;
+  }
+}
+
+function enqueue(d) {
+  const last = S.queue.length ? S.queue[S.queue.length - 1] : S.dir;
+  if (d === last) return;
+  if (S.queue.length && d === OPP[last]) return;
+  if (S.queue.length >= 3) return;
+  S.queue.push(d);
+}
+
+// ---------------------------------------------------------------- title-screen demo
+function demoInit() {
+  S.cfg = Object.assign({}, LEVELS[3], { seed: (Math.random() * 1e9) | 0, spot: 0.003 });
+  generate(S.cfg);
+  S.snake = []; S.strikes = []; S.fruits = []; S.dew = null; S.burned = 0; S.fireIdx = []; S.fireCount = 0;
+  S.wind = ri(8); S.windStr = 0.5; S.demoAcc = 0; S.demoClock = 0; S.demoNext = 2;
+}
+function demoUpdate(dt) {
+  S.demoAcc += dt;
+  while (S.demoAcc >= 250) {
+    S.demoAcc -= 250; S.demoClock++;
+    fireStep();
+    if (S.demoClock >= S.demoNext) {
+      const t = pickTarget();
+      if (t) { bolt(t.x, t.y, true); ignite(t.y * COLS + t.x); }
+      S.demoNext = S.demoClock + 14 + ri(18);
+      if (rand() < 0.3) S.wind = (S.wind + (rand() < 0.5 ? 1 : 7)) % 8;
+    }
+    if (S.burned > S.trees0 * 0.7) demoInit();
+  }
+}
+
+// ---------------------------------------------------------------- effects
+function particle(p) { p.max = p.life; if (S.fx.p.length < 700) S.fx.p.push(p); }
+function text(x, y, s, col) { S.fx.txt.push({ x, y, s, col, t: 0, dur: 1300 }); }
+function bolt(x, y, quiet) {
+  const pts = []; let px = x + 0.5 + (rand() - 0.5) * 4, py = -1;
+  const ty = y + 0.5, steps = 9;
+  for (let k = 0; k <= steps; k++) {
+    const f = k / steps;
+    pts.push([k === steps ? x + 0.5 : px + (x + 0.5 - px) * f + (rand() - 0.5) * 1.6, py + (ty - py) * f]);
+  }
+  S.fx.bolts.push({ pts, t: 0, dur: 380 });
+  if (!quiet) { S.fx.flash = 0.32; S.fx.shake = Math.max(S.fx.shake, 4); sfx('thunder'); }
+  else S.fx.flash = Math.max(S.fx.flash, 0.12);
+  for (let k = 0; k < 14; k++) particle({ x: x + 0.5, y: y + 0.5, vx: (rand() - 0.5) * 8, vy: (rand() - 0.5) * 8, life: 450, size: 0.08, col: '#e8f6ff', kind: 'spark' });
+}
+
+function updateFx(dt) {
+  const fx = S.fx, s = dt / 1000;
+  const w = WIND[S.wind], ws = S.windStr;
+  for (let k = fx.p.length - 1; k >= 0; k--) {
+    const p = fx.p[k];
+    p.life -= dt;
+    if (p.life <= 0) { fx.p.splice(k, 1); continue; }
+    if (p.kind === 'smoke') { p.vx += (w[0] * ws * 2.2 - p.vx) * s * 0.8; p.vy += (w[1] * ws * 2.2 - 0.6 - p.vy) * s * 0.8; p.size += s * 0.45; }
+    else if (p.kind === 'leaf' || p.kind === 'spark') { p.vx *= Math.pow(0.05, s); p.vy *= Math.pow(0.05, s); }
+    p.x += p.vx * s; p.y += p.vy * s;
+  }
+  for (let k = fx.txt.length - 1; k >= 0; k--) { fx.txt[k].t += dt; if (fx.txt[k].t > fx.txt[k].dur) fx.txt.splice(k, 1); }
+  for (let k = fx.bolts.length - 1; k >= 0; k--) { fx.bolts[k].t += dt; if (fx.bolts[k].t > fx.bolts[k].dur) fx.bolts.splice(k, 1); }
+  fx.flash = Math.max(0, fx.flash - s * 1.4);
+  fx.shake = Math.max(0, fx.shake - s * 30);
+  // smoke from fires
+  const live = S.mode === 'play' || S.mode === 'title' || S.mode === 'howto' || S.mode === 'ready' || S.mode === 'dying';
+  if (live && S.fireIdx.length) {
+    const want = Math.min(5, S.fireIdx.length * 0.03 * (dt / 16));
+    let n = Math.floor(want) + (rand() < want % 1 ? 1 : 0);
+    let smoke = 0; for (const p of fx.p) if (p.kind === 'smoke') smoke++;
+    while (n-- > 0 && smoke++ < 260) {
+      const i = S.fireIdx[ri(S.fireIdx.length)];
+      if (S.T[i] !== FIRE) continue;
+      particle({ x: i % COLS + 0.5, y: ((i / COLS) | 0) + 0.3, vx: 0, vy: -0.5, life: 1800 + rand() * 1600, size: 0.35, col: '', kind: 'smoke' });
+    }
+  }
+  // wind streaks
+  for (const st of streaks) {
+    st.x += w[0] * (2 + ws * 9) * s * st.spd; st.y += w[1] * (2 + ws * 9) * s * st.spd;
+    if (st.x < -3) st.x += COLS + 6; if (st.x > COLS + 3) st.x -= COLS + 6;
+    if (st.y < -3) st.y += ROWS + 6; if (st.y > ROWS + 3) st.y -= ROWS + 6;
+  }
+}
+const streaks = [];
+for (let k = 0; k < 42; k++) streaks.push({ x: Math.random() * COLS, y: Math.random() * ROWS, spd: 0.6 + Math.random() * 0.8, len: 0.8 + Math.random() * 1.6, a: 0.05 + Math.random() * 0.08 });
+
+// ---------------------------------------------------------------- audio
+let AC = null, master = null, noiseBuf = null, muted = false;
+let lastRustle = 0, crackleBudget = 0;
+function ensureAudio() {
+  try {
+    if (!AC) {
+      const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+      AC = new C(); master = AC.createGain(); master.gain.value = muted ? 0 : 0.55; master.connect(AC.destination);
+      noiseBuf = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate);
+      const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (AC.state === 'suspended') AC.resume();
+  } catch (e) { AC = null; }
+}
+function tone(f, dur, o) {
+  if (!AC || muted) return; o = o || {};
+  const t = AC.currentTime + (o.delay || 0);
+  const osc = AC.createOscillator(), g = AC.createGain();
+  osc.type = o.type || 'sine'; osc.frequency.setValueAtTime(f, t);
+  if (o.slide) osc.frequency.exponentialRampToValueAtTime(o.slide, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.vol || 0.15, t + (o.attack || 0.01));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g); g.connect(master); osc.start(t); osc.stop(t + dur + 0.05);
+}
+function noise(dur, o) {
+  if (!AC || muted || !noiseBuf) return; o = o || {};
+  const t = AC.currentTime + (o.delay || 0);
+  const src = AC.createBufferSource(); src.buffer = noiseBuf; src.playbackRate.value = o.rate || 1;
+  const fl = AC.createBiquadFilter(); fl.type = o.type || 'lowpass'; fl.frequency.setValueAtTime(o.freq || 1000, t);
+  if (o.freqTo) fl.frequency.exponentialRampToValueAtTime(o.freqTo, t + dur);
+  fl.Q.value = o.q || 0.8;
+  const g = AC.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(o.vol || 0.2, t + (o.attack || 0.005));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(fl); fl.connect(g); g.connect(master);
+  src.start(t, Math.random() * 1.5); src.stop(t + dur + 0.05);
+}
+function sfx(name) {
+  if (!AC || muted) return;
+  switch (name) {
+    case 'start': tone(392, 0.18, { type: 'triangle', vol: 0.12 }); tone(587, 0.3, { type: 'triangle', vol: 0.12, delay: 0.12 }); break;
+    case 'eat': tone(660, 0.12, { type: 'triangle', vol: 0.16, slide: 990 }); tone(1320, 0.18, { type: 'sine', vol: 0.07, delay: 0.06 }); break;
+    case 'rustle': { const now = performance.now(); if (now - lastRustle < 90) return; lastRustle = now; noise(0.07, { type: 'bandpass', freq: 2200, q: 1.2, vol: 0.035 }); break; }
+    case 'warn': tone(1180, 0.09, { type: 'square', vol: 0.04 }); tone(1180, 0.09, { type: 'square', vol: 0.04, delay: 0.16 }); break;
+    case 'thunder': noise(0.12, { type: 'highpass', freq: 1800, vol: 0.35 }); noise(1.6, { type: 'lowpass', freq: 600, freqTo: 120, vol: 0.5, delay: 0.05, attack: 0.04 }); break;
+    case 'ground': tone(300, 0.25, { type: 'sine', vol: 0.15, slide: 900 }); tone(1200, 0.2, { type: 'triangle', vol: 0.06, delay: 0.12 }); break;
+    case 'death': tone(320, 0.7, { type: 'sawtooth', vol: 0.12, slide: 55 }); noise(0.5, { type: 'lowpass', freq: 900, vol: 0.2 }); break;
+    case 'clear': [523, 659, 784, 1047].forEach((f, k) => tone(f, 0.6, { type: 'triangle', vol: 0.1, delay: k * 0.09 })); break;
+    case 'fail': tone(330, 0.4, { type: 'triangle', vol: 0.12 }); tone(247, 0.7, { type: 'triangle', vol: 0.12, delay: 0.3 }); break;
+    case 'wind': noise(1.8, { type: 'bandpass', freq: 500, freqTo: 900, q: 0.6, vol: 0.12, attack: 0.5 }); break;
+    case 'dew': tone(1568, 0.25, { type: 'sine', vol: 0.06 }); tone(2093, 0.3, { type: 'sine', vol: 0.05, delay: 0.1 }); break;
+    case 'rain': noise(1.4, { type: 'highpass', freq: 3000, vol: 0.18, attack: 0.1 }); tone(784, 0.4, { type: 'sine', vol: 0.08 }); break;
+    case 'crackle': noise(0.03, { type: 'bandpass', freq: 1500 + Math.random() * 3000, q: 2, vol: 0.05 + Math.random() * 0.05 }); break;
+  }
+}
+function toggleMute() { muted = !muted; if (master) master.gain.value = muted ? 0 : 0.55; }
+
+// ---------------------------------------------------------------- input
+const KEYDIR = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', w: 'up', W: 'up', s: 'down', S: 'down', a: 'left', A: 'left', d: 'right', D: 'right' };
+function onKey(e) {
+  const k = e.key, d = KEYDIR[k];
+  if (d || k === ' ' || k.startsWith('Arrow')) e.preventDefault();
+  if (e.metaKey || e.ctrlKey) return;
+  ensureAudio();
+  if (k === 'm' || k === 'M') { toggleMute(); return; }
+  switch (S.mode) {
+    case 'title':
+      if (k === 'Enter' || k === ' ') startGame();
+      else if (k === 'h' || k === 'H') setMode('howto');
+      break;
+    case 'howto':
+      if (k === 'Enter' || k === ' ' || k === 'Escape' || k === 'h' || k === 'H') setMode('title');
+      break;
+    case 'ready':
+      if (d && !into(S.snake[0], d, S.snake[1])) { S.dir = d; S.queue = []; S.acc = 0; setMode('play'); }
+      else if (k === 'Escape') { S.pausedFrom = 'ready'; setMode('paused'); }
+      break;
+    case 'play':
+      if (d) enqueue(d);
+      else if (k === ' ' || k === 'p' || k === 'P' || k === 'Escape') { S.pausedFrom = 'play'; setMode('paused'); }
+      break;
+    case 'paused':
+      if (k === ' ' || k === 'p' || k === 'P' || k === 'Enter' || k === 'Escape') setMode(S.pausedFrom || 'play');
+      else if (k === 'q' || k === 'Q') { if (S.score > S.best) { S.best = S.score; saveBest(); } demoInit(); setMode('title'); }
+      break;
+    case 'tally':
+      if ((k === 'Enter' || k === ' ') && S.modeT > 700) afterTally();
+      break;
+    case 'gameover':
+      if ((k === 'Enter' || k === ' ') && S.modeT > 700) { demoInit(); setMode('title'); }
+      break;
+    case 'victory':
+      if ((k === 'Enter' || k === ' ') && S.modeT > 700) { S.endless = true; startSeason(LEVELS.length); }
+      else if (k === 'Escape') { demoInit(); setMode('title'); }
+      break;
+  }
+}
+window.addEventListener('keydown', onKey);
+function autoPause() { if (S.mode === 'play') { S.pausedFrom = 'play'; setMode('paused'); } }
+window.addEventListener('blur', autoPause);
+document.addEventListener('visibilitychange', () => { if (document.hidden) autoPause(); });
+
+// ---------------------------------------------------------------- rendering
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const terr = document.createElement('canvas'), tctx = terr.getContext('2d');
+const glow = document.createElement('canvas');
+let VW = 0, VH = 0, DPR = 1, CELL = 20, OX = 0, OY = 0, BW = 0, BH = 0;
+const HUD = 66;
+const UI = '-apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif';
+const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif';
+
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  VW = window.innerWidth; VH = window.innerHeight;
+  cv.width = Math.floor(VW * DPR); cv.height = Math.floor(VH * DPR);
+  cv.style.width = VW + 'px'; cv.style.height = VH + 'px';
+  CELL = Math.max(8, Math.floor(Math.min((VW - 24) / COLS, (VH - HUD - 14) / ROWS)));
+  BW = CELL * COLS; BH = CELL * ROWS;
+  OX = Math.floor((VW - BW) / 2); OY = HUD + Math.max(0, Math.floor((VH - HUD - BH - 6) / 2));
+  terr.width = Math.floor(BW * DPR); terr.height = Math.floor(BH * DPR);
+  glow.width = glow.height = 64;
+  const g = glow.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,150,50,0.85)'); gr.addColorStop(0.4, 'rgba(255,90,20,0.35)'); gr.addColorStop(1, 'rgba(255,60,0,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  S.dirty = true;
+}
+window.addEventListener('resize', resize);
+
+const CANOPY = ['#2f5a2a', '#356530', '#2b5226', '#3b6b34', '#2a4d2a', '#31602c'];
+const CANOPY_HI = ['#4a8040', '#55904a', '#47783d', '#5c9a4f', '#447038', '#4f8644'];
+
+function drawTerrain() {
+  const c = CELL, T = S.T, V = S.V, g = tctx;
+  g.setTransform(DPR, 0, 0, DPR, 0, 0);
+  g.fillStyle = '#22331b'; g.fillRect(0, 0, BW, BH);
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const i = y * COLS + x, t = T[i], v = V[i], px = x * c, py = y * c;
+    switch (t) {
+      case TREE: g.fillStyle = '#22331b'; g.fillRect(px, py, c, c); break;
+      case GROUND:
+        g.fillStyle = (v & 1) ? '#6b5236' : '#664e33'; g.fillRect(px, py, c, c);
+        g.fillStyle = '#58432b'; g.fillRect(px + (v % 7) / 8 * c, py + ((v >> 3) % 7) / 8 * c, c * 0.12, c * 0.12);
+        break;
+      case MEADOW:
+        g.fillStyle = (v & 1) ? '#5f7232' : '#5a6c30'; g.fillRect(px, py, c, c);
+        g.fillStyle = '#738a3e';
+        g.fillRect(px + (v % 5) / 6 * c, py + ((v >> 2) % 5) / 6 * c, c * 0.08, c * 0.22);
+        g.fillRect(px + ((v >> 4) % 5) / 6 * c, py + ((v >> 1) % 5) / 6 * c, c * 0.08, c * 0.18);
+        break;
+      case ASH:
+        g.fillStyle = (v & 1) ? '#2d2927' : '#2a2624'; g.fillRect(px, py, c, c);
+        g.fillStyle = '#47413c'; g.fillRect(px + (v % 6) / 7 * c, py + ((v >> 3) % 6) / 7 * c, c * 0.1, c * 0.1);
+        g.fillStyle = '#3b3430'; g.fillRect(px + ((v >> 2) % 6) / 7 * c, py + ((v >> 5) % 6) / 7 * c, c * 0.14, c * 0.08);
+        break;
+      case FIRE:
+        g.fillStyle = '#3d1a0e'; g.fillRect(px, py, c, c); break;
+      case WATER:
+        g.fillStyle = '#1f4d6c'; g.fillRect(px, py, c, c);
+        g.fillStyle = '#2e6a90'; g.fillRect(px + c * 0.15 + (v % 4) * c * 0.1, py + c * (0.3 + ((v >> 2) % 4) * 0.12), c * 0.4, Math.max(1, c * 0.06));
+        break;
+      case ROCK:
+        g.fillStyle = '#3f3d38'; g.fillRect(px, py, c, c);
+        break;
+    }
+  }
+  // rocks as boulders
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const i = y * COLS + x; if (T[i] !== ROCK) continue;
+    const v = V[i], px = x * c, py = y * c;
+    g.fillStyle = '#2b2a27'; rrect(g, px + c * 0.1, py + c * 0.16, c * 0.86, c * 0.8, c * 0.28); g.fill();
+    g.fillStyle = (v & 1) ? '#7a7b7e' : '#717275'; rrect(g, px + c * 0.06, py + c * 0.06, c * 0.86, c * 0.8, c * 0.28); g.fill();
+    g.fillStyle = '#9c9ea2'; rrect(g, px + c * 0.18, py + c * 0.14, c * 0.38, c * 0.2, c * 0.1); g.fill();
+  }
+  // canopies, back to front so lower rows overlap upper
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+    const i = y * COLS + x; if (T[i] !== TREE) continue;
+    const v = V[i], cx = x * c + c / 2, cy = y * c + c / 2, r = c * (0.5 + (v % 4) * 0.025);
+    g.fillStyle = 'rgba(8,14,6,0.45)'; g.beginPath(); g.arc(cx + c * 0.08, cy + c * 0.13, r, 0, 6.283); g.fill();
+    g.fillStyle = CANOPY[v % CANOPY.length]; g.beginPath(); g.arc(cx, cy, r, 0, 6.283); g.fill();
+    g.fillStyle = CANOPY_HI[(v >> 3) % CANOPY_HI.length];
+    g.beginPath(); g.arc(cx - c * 0.14, cy - c * 0.16, r * 0.42, 0, 6.283); g.fill();
+  }
+  S.dirty = false;
+}
+
+function rrect(g, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + w - r, y); g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h); g.lineTo(x + r, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - r); g.lineTo(x, y + r); g.quadraticCurveTo(x, y, x + r, y); g.closePath();
+}
+
+function drawFire(now) {
+  const c = CELL, T = S.T;
+  const list = S.fireIdx;
+  // flames
+  for (const i of list) {
+    if (T[i] !== FIRE) continue;
+    const x = i % COLS, y = (i / COLS) | 0, v = S.V[i];
+    const frac = Math.min(1, S.burn[i] / Math.max(1, S.cfg.burn));
+    const fl = 0.75 + 0.25 * Math.sin(now * 0.013 + v);
+    const cx = OX + x * c + c / 2, by = OY + y * c + c * 0.85;
+    const h = c * (0.55 + 0.6 * frac) * fl, w = c * (0.26 + 0.12 * frac);
+    const sway = Math.sin(now * 0.009 + v * 0.7) * c * 0.12 + WIND[S.wind][0] * S.windStr * c * 0.25;
+    flame(cx - c * 0.16, by, h * 0.75, w * 0.8, sway, '#d8401c');
+    flame(cx + c * 0.14, by, h * 0.8, w * 0.8, sway, '#e2521f');
+    flame(cx, by, h, w, sway, '#ff8a22');
+    flame(cx, by, h * 0.55, w * 0.5, sway * 0.6, '#ffd65a');
+  }
+  // glow
+  ctx.save(); ctx.globalCompositeOperation = 'lighter';
+  for (const i of list) {
+    if (T[i] !== FIRE) continue;
+    const x = i % COLS, y = (i / COLS) | 0;
+    ctx.globalAlpha = 0.28 + 0.12 * Math.sin(now * 0.02 + S.V[i]);
+    ctx.drawImage(glow, OX + x * c + c / 2 - c * 1.4, OY + y * c + c / 2 - c * 1.4, c * 2.8, c * 2.8);
+  }
+  ctx.restore();
+}
+function flame(x, y, h, w, sway, col) {
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x - w, y);
+  ctx.quadraticCurveTo(x - w * 1.1, y - h * 0.55, x + sway, y - h);
+  ctx.quadraticCurveTo(x + w * 1.1, y - h * 0.55, x + w, y);
+  ctx.quadraticCurveTo(x, y + w * 0.6, x - w, y);
+  ctx.fill();
+}
+
+function drawSnake(now) {
+  const sn = S.snake, L = sn.length, c = CELL;
+  if (!L) return;
+  const dying = S.mode === 'dying';
+  const px = s => OX + s.x * c + c / 2, py = s => OY + s.y * c + c / 2;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  // outline
+  ctx.strokeStyle = '#0a1a1c'; ctx.lineWidth = c * 0.8;
+  ctx.beginPath(); ctx.moveTo(px(sn[0]), py(sn[0]));
+  for (let k = 1; k < L; k++) ctx.lineTo(px(sn[k]), py(sn[k]));
+  if (L === 1) ctx.lineTo(px(sn[0]) + 0.01, py(sn[0]));
+  ctx.stroke();
+  // body, coloured head to tail
+  for (let k = L - 1; k >= 1; k--) {
+    const t = k / Math.max(1, L - 1);
+    let col = mix([159, 243, 228], [42, 140, 152], t);
+    if (dying && Math.floor(S.modeT / 110) % 2 === 0) col = [255, 150, 110];
+    ctx.strokeStyle = 'rgb(' + col.join(',') + ')'; ctx.lineWidth = c * 0.62;
+    ctx.beginPath(); ctx.moveTo(px(sn[k]), py(sn[k])); ctx.lineTo(px(sn[k - 1]), py(sn[k - 1])); ctx.stroke();
+  }
+  // scales
+  ctx.fillStyle = 'rgba(10,40,45,0.35)';
+  for (let k = 2; k < L; k += 2) { ctx.beginPath(); ctx.arc(px(sn[k]), py(sn[k]), c * 0.11, 0, 6.283); ctx.fill(); }
+  // head
+  const h = sn[0], hx = px(h), hy = py(h), dv = DIRV[S.dir];
+  ctx.fillStyle = dying && Math.floor(S.modeT / 110) % 2 === 0 ? '#ff9b6e' : '#b9fbef';
+  ctx.beginPath(); ctx.arc(hx, hy, c * 0.42, 0, 6.283); ctx.fill();
+  ctx.strokeStyle = '#0a1a1c'; ctx.lineWidth = Math.max(1, c * 0.06); ctx.stroke();
+  const ex = -dv[1], ey = dv[0];
+  for (const sgn of [-1, 1]) {
+    const x = hx + dv[0] * c * 0.14 + ex * sgn * c * 0.18, y = hy + dv[1] * c * 0.14 + ey * sgn * c * 0.18;
+    ctx.fillStyle = '#0b1416'; ctx.beginPath(); ctx.arc(x, y, c * 0.085, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + dv[0] * c * 0.03, y + dv[1] * c * 0.03, c * 0.03, 0, 6.283); ctx.fill();
+  }
+  // tongue flick
+  if (!dying && Math.sin(now * 0.006) > 0.6) {
+    ctx.strokeStyle = '#ff5d6c'; ctx.lineWidth = Math.max(1, c * 0.05);
+    const tx = hx + dv[0] * c * 0.42, ty = hy + dv[1] * c * 0.42;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx + dv[0] * c * 0.2, ty + dv[1] * c * 0.2); ctx.stroke();
+  }
+}
+function mix(a, b, t) { return [0, 1, 2].map(k => Math.round(a[k] + (b[k] - a[k]) * t)); }
+
+function drawPickups(now) {
+  const c = CELL;
+  for (const f of S.fruits) {
+    const cx = OX + f.x * c + c / 2, cy = OY + f.y * c + c / 2;
+    const p = 0.5 + 0.5 * Math.sin(now * 0.005 + f.ph);
+    ctx.strokeStyle = 'rgba(255,214,120,' + (0.25 + 0.35 * p) + ')'; ctx.lineWidth = Math.max(1, c * 0.07);
+    ctx.beginPath(); ctx.arc(cx, cy, c * (0.42 + 0.08 * p), 0, 6.283); ctx.stroke();
+    ctx.fillStyle = '#2a0d07'; ctx.beginPath(); ctx.arc(cx + c * 0.04, cy + c * 0.06, c * 0.27, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#ff5b3a'; ctx.beginPath(); ctx.arc(cx, cy + c * 0.02, c * 0.26, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#ffb49a'; ctx.beginPath(); ctx.arc(cx - c * 0.09, cy - c * 0.06, c * 0.08, 0, 6.283); ctx.fill();
+    ctx.fillStyle = '#8fd060'; ctx.beginPath(); ctx.ellipse(cx + c * 0.08, cy - c * 0.27, c * 0.11, c * 0.05, -0.6, 0, 6.283); ctx.fill();
+  }
+  if (S.dew) {
+    const d = S.dew, cx = OX + d.x * c + c / 2, cy = OY + d.y * c + c / 2;
+    const left = (d.until - S.st) / sec(20);
+    const p = 0.5 + 0.5 * Math.sin(now * 0.008);
+    if (left > 0.25 || Math.floor(now / 150) % 2) {
+      ctx.strokeStyle = 'rgba(150,210,255,' + (0.3 + 0.4 * p) + ')'; ctx.lineWidth = Math.max(1, c * 0.07);
+      ctx.beginPath(); ctx.arc(cx, cy, c * (0.5 + 0.12 * p), 0, 6.283); ctx.stroke();
+      ctx.fillStyle = '#7cc4ff'; ctx.beginPath();
+      ctx.moveTo(cx, cy - c * 0.36); ctx.quadraticCurveTo(cx + c * 0.3, cy + c * 0.02, cx, cy + c * 0.3);
+      ctx.quadraticCurveTo(cx - c * 0.3, cy + c * 0.02, cx, cy - c * 0.36); ctx.fill();
+      ctx.fillStyle = '#e6f5ff'; ctx.beginPath(); ctx.arc(cx - c * 0.07, cy + c * 0.02, c * 0.06, 0, 6.283); ctx.fill();
+    }
+  }
+}
+
+function drawStrikes(now) {
+  const c = CELL;
+  for (const s of S.strikes) {
+    const p = Math.min(1, (S.st - s.warnAt) / Math.max(1, s.landAt - s.warnAt));
+    const cx = OX + s.x * c + c / 2, cy = OY + s.y * c + c / 2;
+    const fl = Math.floor(now / (p > 0.7 ? 70 : 140)) % 2;
+    // a faint column of light from the sky
+    const grd = ctx.createLinearGradient(0, OY, 0, cy);
+    grd.addColorStop(0, 'rgba(200,225,255,0)'); grd.addColorStop(1, 'rgba(200,225,255,' + (0.06 + 0.14 * p) + ')');
+    ctx.fillStyle = grd; ctx.fillRect(cx - c * 0.35, OY, c * 0.7, cy - OY);
+    ctx.strokeStyle = 'rgba(225,240,255,' + (0.55 + 0.45 * fl) + ')'; ctx.lineWidth = Math.max(1.5, c * 0.09);
+    ctx.beginPath(); ctx.arc(cx, cy, c * (1.6 - 1.05 * p), 0, 6.283); ctx.stroke();
+    ctx.lineWidth = Math.max(1, c * 0.06);
+    const a = c * 0.7;
+    ctx.beginPath(); ctx.moveTo(cx - a, cy); ctx.lineTo(cx - a * 0.4, cy); ctx.moveTo(cx + a * 0.4, cy); ctx.lineTo(cx + a, cy);
+    ctx.moveTo(cx, cy - a); ctx.lineTo(cx, cy - a * 0.4); ctx.moveTo(cx, cy + a * 0.4); ctx.lineTo(cx, cy + a); ctx.stroke();
+    // time left
+    ctx.strokeStyle = 'rgba(255,240,170,0.95)'; ctx.lineWidth = Math.max(2, c * 0.12);
+    ctx.beginPath(); ctx.arc(cx, cy, c * 0.42, -Math.PI / 2, -Math.PI / 2 + (1 - p) * 6.283); ctx.stroke();
+  }
+}
+
+function drawFx(now) {
+  const c = CELL, fx = S.fx;
+  for (const p of fx.p) {
+    const a = Math.max(0, p.life / p.max);
+    const x = OX + p.x * c, y = OY + p.y * c;
+    if (p.kind === 'smoke') {
+      ctx.fillStyle = 'rgba(60,56,54,' + (0.22 * a * Math.min(1, (p.max - p.life) / 300)) + ')';
+      ctx.beginPath(); ctx.arc(x, y, c * p.size, 0, 6.283); ctx.fill();
+    } else if (p.kind === 'rain') {
+      ctx.strokeStyle = 'rgba(190,225,255,' + (0.7 * a) + ')'; ctx.lineWidth = Math.max(1, c * 0.05);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - c * 0.05, y - c * 0.35); ctx.stroke();
+    } else {
+      ctx.globalAlpha = a; ctx.fillStyle = p.col;
+      ctx.fillRect(x - c * p.size / 2, y - c * p.size / 2, c * p.size, c * p.size);
+      ctx.globalAlpha = 1;
+    }
+  }
+  for (const b of fx.bolts) {
+    const a = 1 - b.t / b.dur;
+    ctx.save(); ctx.lineJoin = 'round';
+    for (const [wd, col] of [[c * 0.4, 'rgba(140,190,255,' + 0.35 * a + ')'], [Math.max(2, c * 0.12), 'rgba(245,250,255,' + a + ')']]) {
+      ctx.strokeStyle = col; ctx.lineWidth = wd; ctx.beginPath();
+      b.pts.forEach((pt, k) => { const x = OX + pt[0] * c, y = OY + pt[1] * c; if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y); });
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  for (const t of fx.txt) {
+    const a = 1 - t.t / t.dur;
+    ctx.font = '700 ' + Math.max(12, Math.round(c * 0.62)) + 'px ' + UI; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,' + 0.6 * a + ')'; ctx.fillText(t.s, OX + t.x * c + 1, OY + (t.y - t.t / 900) * c + 1);
+    ctx.globalAlpha = a; ctx.fillStyle = t.col; ctx.fillText(t.s, OX + t.x * c, OY + (t.y - t.t / 900) * c); ctx.globalAlpha = 1;
+  }
+}
+
+function drawWind() {
+  const c = CELL, w = WIND[S.wind], ws = S.windStr;
+  if (ws < 0.05) return;
+  ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1, c * 0.06);
+  for (const s of streaks) {
+    ctx.strokeStyle = 'rgba(235,240,230,' + (s.a * Math.min(1, ws * 1.6)) + ')';
+    const x = OX + s.x * c, y = OY + s.y * c;
+    if (x < OX || y < OY || x > OX + BW || y > OY + BH) continue;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - w[0] * s.len * c * (0.6 + ws), y - w[1] * s.len * c * (0.6 + ws)); ctx.stroke();
+  }
+}
+
+// ----- HUD
+function drawHUD(now) {
+  ctx.fillStyle = '#101310'; ctx.fillRect(0, 0, VW, HUD - 6);
+  ctx.fillStyle = '#1c211a'; ctx.fillRect(0, HUD - 7, VW, 1);
+  const L = OX, R = OX + BW, y1 = 24, y2 = 46;
+  ctx.textBaseline = 'alphabetic';
+  // title and season
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#e9c98a'; ctx.font = '600 15px ' + SERIF; spaced('EMBERWOOD', L, y1, 2.5);
+  if (S.mode === 'title' || S.mode === 'howto') {
+    ctx.fillStyle = '#a9b39a'; ctx.font = '13px ' + UI; ctx.fillText('A snake game for a dry year', L, y2);
+    ctx.textAlign = 'right'; ctx.fillStyle = '#8f9a83'; ctx.font = '12px ' + UI;
+    ctx.fillText(muted ? 'sound off (M)' : 'sound on (M)', R, y1);
+    if (S.best) ctx.fillText('best ' + S.best, R, y2);
+    ctx.textAlign = 'left';
+    return;
+  }
+  ctx.fillStyle = '#a9b39a'; ctx.font = '13px ' + UI;
+  const sname = S.season < LEVELS.length ? 'Season ' + (S.season + 1) + ' of ' + LEVELS.length + ': ' + S.cfg.name : S.cfg.name;
+  ctx.fillText(sname, L, y2);
+  // forest bar
+  const fx0 = L + BW * 0.30, fw = BW * 0.22;
+  const saved = savedPct(), tgt = S.cfg.target;
+  const danger = saved - tgt < 6 && S.mode === 'play';
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('FOREST', fx0, y1 - 4, 1.5);
+  ctx.textAlign = 'right'; ctx.fillStyle = danger && Math.floor(now / 250) % 2 ? '#ff8a5a' : '#dfe8d2'; ctx.font = '700 14px ' + UI;
+  ctx.fillText(Math.max(0, saved).toFixed(0) + '%', fx0 + fw, y1 - 3);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#26301f'; rrect(ctx, fx0, y1 + 3, fw, 10, 5); ctx.fill();
+  const fill = Math.max(0, Math.min(1, saved / 100));
+  ctx.fillStyle = danger ? '#d9733f' : '#5f9a45'; rrect(ctx, fx0, y1 + 3, Math.max(10, fw * fill), 10, 5); ctx.fill();
+  const tx = fx0 + fw * tgt / 100;
+  ctx.fillStyle = '#ffdd88'; ctx.fillRect(tx - 1, y1, 2, 16);
+  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI;
+  ctx.fillText('keep above ' + tgt + '%', fx0, y2 + 2);
+  // storm
+  const sx0 = L + BW * 0.57;
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('STORM', sx0, y1 - 4, 1.5);
+  const left = strikesLeft();
+  const total = S.cfg.strikes;
+  const bw = Math.min(12, (BW * 0.13) / Math.max(1, total));
+  for (let k = 0; k < total; k++) boltIcon(sx0 + k * bw + 1, y1 + 1, bw * 0.62, k < left ? '#f3e7a0' : '#3a3f33');
+  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI;
+  const fires = S.fireCount;
+  ctx.fillText(left ? left + ' strike' + (left === 1 ? '' : 's') + ' to come' : (fires ? 'storm passed, ' + fires + ' burning' : 'storm passed'), sx0, y2 + 2);
+  // wind
+  const wx0 = L + BW * 0.73, wcx = wx0 + 16, wcy = y1 + 8;
+  ctx.strokeStyle = '#3a4434'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(wcx, wcy, 15, 0, 6.283); ctx.stroke();
+  windArrow(wcx, wcy, S.wind, 12, '#e6eedc', 2.5);
+  if (S.windNext >= 0 && Math.floor(now / 200) % 2) windArrow(wcx, wcy, S.windNext, 12, '#ffb36a', 2);
+  ctx.textAlign = 'left'; ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; spaced('WIND', wx0 + 38, y1 - 4, 1.5);
+  ctx.fillStyle = S.windNext >= 0 ? '#ffb36a' : '#dfe8d2'; ctx.font = '12px ' + UI;
+  const wn = S.windStr < 0.25 ? 'light' : S.windStr < 0.45 ? 'breezy' : S.windStr < 0.65 ? 'strong' : 'gale';
+  ctx.fillText(S.windNext >= 0 ? 'turning' : wn, wx0 + 38, y1 + 13);
+  // score and lives
+  ctx.textAlign = 'right';
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; ctx.fillText('SCORE', R - 90, y1 - 4);
+  ctx.fillStyle = '#f2ead6'; ctx.font = '700 18px ' + UI; ctx.fillText(String(S.score), R - 90, y1 + 14);
+  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI; ctx.fillText('best ' + S.best, R - 90, y2 + 2);
+  ctx.fillStyle = '#8f9a83'; ctx.font = '600 11px ' + UI; ctx.fillText('LIVES', R, y1 - 4);
+  for (let k = 0; k < 5; k++) {
+    ctx.fillStyle = k < S.lives ? '#9ff3e4' : '#2a332a';
+    ctx.beginPath(); ctx.arc(R - 6 - k * 14, y1 + 9, 5, 0, 6.283); ctx.fill();
+  }
+  ctx.fillStyle = '#8f9a83'; ctx.font = '11px ' + UI; ctx.fillText('length ' + S.snake.length, R, y2 + 2);
+  ctx.textAlign = 'left';
+}
+function spaced(s, x, y, sp) { for (const ch of s) { ctx.fillText(ch, x, y); x += ctx.measureText(ch).width + sp; } }
+function boltIcon(x, y, w, col) {
+  ctx.fillStyle = col; ctx.beginPath();
+  ctx.moveTo(x + w * 0.6, y); ctx.lineTo(x + w * 0.1, y + w * 0.9); ctx.lineTo(x + w * 0.45, y + w * 0.9);
+  ctx.lineTo(x + w * 0.3, y + w * 1.6); ctx.lineTo(x + w * 0.9, y + w * 0.6); ctx.lineTo(x + w * 0.55, y + w * 0.6); ctx.closePath(); ctx.fill();
+}
+function windArrow(cx, cy, dirIdx, len, col, lw) {
+  const w = WIND[dirIdx];
+  const x1 = cx - w[0] * len * 0.8, y1 = cy - w[1] * len * 0.8, x2 = cx + w[0] * len * 0.8, y2 = cy + w[1] * len * 0.8;
+  ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = lw; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+  const a = Math.atan2(w[1], w[0]);
+  ctx.beginPath(); ctx.moveTo(x2 + Math.cos(a) * 3, y2 + Math.sin(a) * 3);
+  ctx.lineTo(x2 + Math.cos(a + 2.5) * 7, y2 + Math.sin(a + 2.5) * 7);
+  ctx.lineTo(x2 + Math.cos(a - 2.5) * 7, y2 + Math.sin(a - 2.5) * 7); ctx.closePath(); ctx.fill();
+}
+
+// ----- overlays
+function panel(w, h, yOff) {
+  const x = OX + (BW - w) / 2, y = OY + (BH - h) / 2 + (yOff || 0);
+  ctx.fillStyle = 'rgba(12,14,11,0.86)'; rrect(ctx, x, y, w, h, 14); ctx.fill();
+  ctx.strokeStyle = 'rgba(233,201,138,0.35)'; ctx.lineWidth = 1; rrect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, 14); ctx.stroke();
+  return { x, y, w, h, cx: x + w / 2 };
+}
+function centerText(s, cx, y, font, col) { ctx.font = font; ctx.fillStyle = col; ctx.textAlign = 'center'; ctx.fillText(s, cx, y); }
+function wrap(s, maxW) {
+  const words = s.split(' '), lines = []; let cur = '';
+  for (const w of words) { const t = cur ? cur + ' ' + w : w; if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t; }
+  if (cur) lines.push(cur); return lines;
+}
+
+function drawOverlay(now) {
+  const m = S.mode;
+  if (m === 'title') {
+    ctx.fillStyle = 'rgba(8,10,7,0.55)'; ctx.fillRect(OX, OY, BW, BH);
+    const P = panel(Math.min(560, BW - 40), 330);
+    centerText('EMBERWOOD', P.cx, P.y + 92, '600 ' + Math.min(64, BW / 12) + 'px ' + SERIF, '#f0cf8c');
+    centerText('Snake, in a forest that is on fire.', P.cx, P.y + 138, 'italic 19px ' + SERIF, '#d9d2bf');
+    centerText('Your trail is the firebreak.', P.cx, P.y + 164, 'italic 19px ' + SERIF, '#d9d2bf');
+    const blink = Math.floor(now / 600) % 2 ? '#ffe3a3' : '#c9b27f';
+    centerText('Press Enter to begin', P.cx, P.y + 224, '700 18px ' + UI, blink);
+    centerText('H  how to play        M  sound on or off', P.cx, P.y + 256, '14px ' + UI, '#a9b39a');
+    centerText(S.best ? 'Best score ' + S.best : 'Ten seasons. Arrow keys or WASD.', P.cx, P.y + 296, '13px ' + UI, '#7f8a72');
+  } else if (m === 'howto') {
+    ctx.fillStyle = 'rgba(8,10,7,0.6)'; ctx.fillRect(OX, OY, BW, BH);
+    const P = panel(Math.min(680, BW - 30), Math.min(BH - 20, 470));
+    centerText('How to play', P.cx, P.y + 46, '600 28px ' + SERIF, '#f0cf8c');
+    const items = [
+      'Steer with the arrow keys or WASD. Like any snake, you never stop moving.',
+      'Your head clears every tree it moves into, leaving bare ground. Pushing through trees is slower than travelling on open ground, so your old trails become roads.',
+      'Lightning marks pulse before they strike. A strike sets the trees on fire. Reach a mark and clear it before it lands to ground the bolt.',
+      'Fire spreads from tree to tree, much faster downwind. It cannot cross bare ground, meadow, ash, rock or water. Strong wind throws embers over thin breaks.',
+      'Carve firebreaks around fires to contain them. A season ends when the storm has passed and the last flame is out. Keep the forest above the target or lose a life.',
+      'Fruit makes you longer and scores points. A blue dew drop brings rain that puts out nearby fire. Running into fire, rock, water, the edge or yourself costs a life.',
+    ];
+    ctx.font = '15px ' + UI; ctx.textAlign = 'left';
+    let y = P.y + 86; const x = P.x + 34, mw = P.w - 68;
+    items.forEach((it, k) => {
+      ctx.fillStyle = '#e9c98a'; ctx.font = '700 15px ' + UI; ctx.fillText(String(k + 1), x - 16, y);
+      ctx.fillStyle = '#d8d6c8'; ctx.font = '15px ' + UI;
+      for (const line of wrap(it, mw)) { ctx.fillText(line, x, y); y += 20; }
+      y += 9;
+    });
+    centerText('P or Space to pause.  Enter to go back.', P.cx, P.y + P.h - 20, '13px ' + UI, '#8f9a83');
+  } else if (m === 'ready') {
+    const P = panel(Math.min(520, BW - 40), 150, -BH * 0.22);
+    centerText(S.cfg.name, P.cx, P.y + 44, '600 28px ' + SERIF, '#f0cf8c');
+    ctx.font = '15px ' + UI; let y = P.y + 72;
+    for (const line of wrap(S.cfg.blurb, P.w - 50)) { centerText(line, P.cx, y, '15px ' + UI, '#d8d6c8'); y += 19; }
+    const blink = Math.floor(now / 500) % 2 ? '#ffe3a3' : '#b8a273';
+    centerText(S.st > 0 ? 'Press an arrow key to carry on' : 'Keep ' + S.cfg.target + '% of the forest. Press an arrow key to start.', P.cx, P.y + P.h - 18, '600 14px ' + UI, blink);
+  } else if (m === 'paused') {
+    const P = panel(360, 130);
+    centerText('Paused', P.cx, P.y + 56, '600 30px ' + SERIF, '#f0cf8c');
+    centerText('Space to carry on.  Q to quit to the title.', P.cx, P.y + 94, '14px ' + UI, '#c9c6b6');
+  } else if (m === 'dying') {
+    ctx.fillStyle = 'rgba(120,20,10,' + 0.25 * Math.max(0, 1 - S.modeT / 900) + ')'; ctx.fillRect(OX, OY, BW, BH);
+    const P = panel(Math.min(500, BW - 40), 70, BH * 0.3);
+    centerText(DEATH_TEXT[S.deathReason] || 'Ouch.', P.cx, P.y + 43, '600 17px ' + UI, '#ffb99a');
+  } else if (m === 'tally') {
+    const r = S.result;
+    const P = panel(Math.min(460, BW - 40), r.pass ? 330 : 230);
+    centerText(r.pass ? 'The wood still stands' : 'The forest fell', P.cx, P.y + 50, '600 28px ' + SERIF, r.pass ? '#f0cf8c' : '#ff9e7a');
+    centerText(S.cfg.name, P.cx, P.y + 76, '14px ' + UI, '#8f9a83');
+    const rows = r.pass ? [
+      ['Forest saved', r.saved.toFixed(0) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Forest points', '+' + r.forestPts], ['Length ' + r.length, '+' + r.lengthPts], ['Season bonus', '+' + r.bonus],
+      ['Fruit eaten / bolts grounded', r.fruit + ' / ' + r.grounded],
+    ] : [
+      ['Forest left', r.saved.toFixed(0) + '%  (needed ' + S.cfg.target + '%)'],
+      ['Lives left', String(Math.max(0, S.lives))],
+    ];
+    let y = P.y + 112;
+    for (const [a, b] of rows) {
+      ctx.textAlign = 'left'; ctx.font = '15px ' + UI; ctx.fillStyle = '#b7bfa9'; ctx.fillText(a, P.x + 36, y);
+      ctx.textAlign = 'right'; ctx.fillStyle = '#f2ead6'; ctx.fillText(b, P.x + P.w - 36, y); y += 27;
+    }
+    if (r.lifeGained) centerText('An extra life for three seasons cleared', P.cx, y + 4, '600 14px ' + UI, '#9ff3e4');
+    const msg = !r.pass && S.lives <= 0 ? 'Enter to see your score' : r.pass ? 'Enter for the next season' : 'Enter to try this season again';
+    if (S.modeT > 700) centerText(msg, P.cx, P.y + P.h - 22, '600 14px ' + UI, Math.floor(now / 500) % 2 ? '#ffe3a3' : '#b8a273');
+  } else if (m === 'gameover') {
+    ctx.fillStyle = 'rgba(8,10,7,0.5)'; ctx.fillRect(OX, OY, BW, BH);
+    const P = panel(Math.min(440, BW - 40), 230);
+    centerText('Out of lives', P.cx, P.y + 54, '600 30px ' + SERIF, '#ff9e7a');
+    centerText('You reached ' + (S.season < LEVELS.length ? 'season ' + (S.season + 1) : S.cfg.name), P.cx, P.y + 90, '15px ' + UI, '#c9c6b6');
+    centerText('Score ' + S.score, P.cx, P.y + 130, '700 24px ' + UI, '#f2ead6');
+    centerText(S.score >= S.best && S.score > 0 ? 'A new best' : 'Best ' + S.best, P.cx, P.y + 158, '14px ' + UI, '#9ff3e4');
+    if (S.modeT > 700) centerText('Enter to return to the title', P.cx, P.y + 200, '600 14px ' + UI, '#c9b27f');
+  } else if (m === 'victory') {
+    ctx.fillStyle = 'rgba(8,10,7,0.45)'; ctx.fillRect(OX, OY, BW, BH);
+    const P = panel(Math.min(520, BW - 40), 260);
+    centerText('Ten seasons', P.cx, P.y + 56, '600 32px ' + SERIF, '#f0cf8c');
+    centerText('The storms have passed and the wood still stands.', P.cx, P.y + 92, 'italic 17px ' + SERIF, '#d9d2bf');
+    centerText('Score ' + S.score, P.cx, P.y + 138, '700 24px ' + UI, '#f2ead6');
+    centerText('Best ' + S.best, P.cx, P.y + 164, '14px ' + UI, '#9ff3e4');
+    if (S.modeT > 700) {
+      centerText('Enter to keep going into endless seasons', P.cx, P.y + 206, '600 14px ' + UI, '#ffe3a3');
+      centerText('Esc for the title', P.cx, P.y + 230, '13px ' + UI, '#8f9a83');
+    }
+  }
+}
+
+function render(now) {
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.fillStyle = '#0c0e0b'; ctx.fillRect(0, 0, VW, VH);
+  if (S.dirty) drawTerrain();
+  const sh = S.fx.shake;
+  ctx.save();
+  if (sh > 0) ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
+  ctx.beginPath(); ctx.rect(OX, OY, BW, BH); ctx.clip();
+  ctx.drawImage(terr, OX, OY, BW, BH);
+  drawFire(now);
+  drawPickups(now);
+  if (S.mode !== 'title' && S.mode !== 'howto') drawSnake(now);
+  drawStrikes(now);
+  drawFx(now);
+  drawWind();
+  if (S.fx.flash > 0) { ctx.fillStyle = 'rgba(235,244,255,' + S.fx.flash + ')'; ctx.fillRect(OX, OY, BW, BH); }
+  ctx.restore();
+  ctx.strokeStyle = '#2a3224'; ctx.lineWidth = 2; ctx.strokeRect(OX - 1, OY - 1, BW + 2, BH + 2);
+  drawHUD(now);
+  drawOverlay(now);
+}
+
+// ---------------------------------------------------------------- main loop
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(100, now - last); last = now;
+  S.modeT += dt;
+  if (S.mode === 'play' && !API.manual) {
+    S.acc += dt; let n = 0;
+    while (S.acc >= STEP && n < 8) { S.acc -= STEP; step(); n++; if (S.mode !== 'play') break; }
+    if (S.mode === 'play' && S.fireCount) {
+      crackleBudget += Math.min(16, S.fireCount * 0.12) * dt / 1000;
+      while (crackleBudget >= 1) { crackleBudget -= 1; sfx('crackle'); }
+    }
+  }
+  if ((S.mode === 'title' || S.mode === 'howto') && !API.manual) demoUpdate(dt);
+  if (S.mode === 'dying' && S.modeT > 1300) afterDeath();
+  updateFx(dt);
+  render(now);
+  requestAnimationFrame(frame);
+}
+
+// test hooks (harmless in normal play)
+const API = window.__ew = {
+  S, LEVELS, cfgFor, step, startGame, startSeason, generate, fireStep, enqueue, savedPct, strikesLeft, setMode, demoInit,
+  setSeed: s => { rand = mulberry32(s >>> 0); }, manual: false, COLS, ROWS, TYPES: { GROUND, TREE, FIRE, ASH, ROCK, WATER, MEADOW }, sec,
+};
+
+resize();
+demoInit();
+cv.focus();
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
