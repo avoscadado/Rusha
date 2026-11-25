@@ -1,0 +1,13 @@
+== SHIPPED over={} opts={"preview":24}  (n=300, fruit in plan mean 100.4 median 98)
+                                      day1    day2    day3    day4    day5    day6
+share of plan harvested that day     23.1%   19.7%   15.8%   12.7%    8.8%    5.4%
+cumulative share                     23.1%   42.8%   58.6%   71.3%   80.0%   85.5%
+runs reaching the day               100.0%   99.0%   93.7%   88.0%   83.7%   81.0%
+attempts that die (deaths/attempts)   14.2%   33.6%   35.5%   36.0%   27.0%   25.6%
+first day cumulative >= 90%           0.0%    0.0%    0.0%    0.0%   20.0%   58.7%
+first day cumulative = 100%           0.0%    0.0%    0.0%    0.0%    0.0%    0.7%
+never reaches 90% / 100%: 21.3% / 99.3%
+mean deaths/run 2.17 | victory 0.7% | >=90% 78.7% | >=75% 83.0% | out of rewinds 19.7% | mean end day 5.45
+final share mean 85.5% | p10/p25/p50/p75/p90 44.9% 91.8% 94.6% 95.9% 98.0% | minutes mean 6.33 median 6.41 min 1.16 max 10.10
+death causes {"wall":132,"self":176,"echo":342} | game-reported harvest differs from banked in 0.0% of runs (mean +0.0%)
+(52.0 s)
