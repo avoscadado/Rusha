@@ -26,15 +26,16 @@ noscript{position:fixed;top:40%;left:0;right:0;text-align:center;color:#cfe;font
 const DIRS = [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }]; // 0 up, 1 right, 2 down, 3 left
 
 const CFG = {
-  cols: 44, rows: 28,          // the classic Nokia board is roughly 20 x 20; this is about three times the area
+  cols: 60, rows: 38,          // the classic Nokia board is roughly 20 x 20; this is more than five times the area
   tickMs: 112,                 // one move every 112 ms
-  dayTicks: 620,               // one day is about 70 seconds
-  days: 5,
+  dayTicks: 500,               // one day is 56 seconds
+  days: 6,
   startLen: 4,
-  rewinds: 3, maxRewinds: 5,
-  // fruit schedule (identical every day)
-  firstWave: 10, waveEvery: 62, waveJitter: 6, waveSize: 6, lastWaveMargin: 70,
-  stagger: 6, life: 64, lifeJitter: 10, minGap: 2,
+  rewinds: 2, maxRewinds: 5,
+  // fruit schedule (identical every day). The numbers come from simulating thousands of runs with scripted players
+  // (see tests/balance): a perfect planner needs until about day 5 to harvest nearly everything.
+  firstWave: 10, waveEvery: 62, waveJitter: 6, waveSize: 14, lastWaveMargin: 70,
+  stagger: 6, life: 30, lifeJitter: 4, minGap: 2,
   // scoring
   fruitPoints: 100, comboWindow: 36, comboMax: 4, dayBonus: 250, nearMiss: 25,
   perfectBonus: 5000, rewindBonus: 1000,
@@ -194,6 +195,28 @@ class Game {
       }
       if (clear >= 6) return c;
       if (clear > bestClear) { bestClear = clear; best = c; }
+    }
+    // Late days can have so many Echoes that none of the usual spots is quiet. Search a coarse grid for a better one,
+    // heading for the middle of the board so there is room to move. Still a pure function of the Echoes, so every rewind agrees.
+    if (bestClear < 6) {
+      for (let y = 5; y <= R - 6; y += 4) {
+        for (let x = 8; x <= C - 9; x += 4) {
+          const c = { x: x, y: y, d: x < C / 2 ? 1 : 3 }, d = DIRS[c.d];
+          let clear = 99;
+          for (let k = 0; k <= AHEAD && clear > bestClear; k++) {
+            for (let q = 0; q < this.echoes.length; q++) {
+              const e = this.echoes[q], te = Math.min(k, e.t), h = e.hi(te), s = e.si(te);
+              for (let i = s; i <= h; i++) {
+                for (let j = 0; j < L; j++) {
+                  const dist = Math.max(Math.abs(e.px[i] - (c.x + d.x * (k - j))), Math.abs(e.py[i] - (c.y + d.y * (k - j))));
+                  if (dist < clear) clear = dist;
+                }
+              }
+            }
+          }
+          if (clear > bestClear) { bestClear = clear; best = c; }
+        }
+      }
     }
     return best;
   }
@@ -540,8 +563,9 @@ function drawSnake(run, t, alpha, o) {
 }
 const DIRS_X = [0, 1, 0, -1], DIRS_Y = [-1, 0, 1, 0];
 
+const PREVIEW_TICKS = 24;   // how far ahead an Echo's route is drawn (about 2.7 seconds); balance was tuned with this value
 function drawEchoPreview(e, t) {
-  const te = Math.min(t, e.t), end = Math.min(e.t, te + 14);
+  const te = Math.min(t, e.t), end = Math.min(e.t, te + PREVIEW_TICKS);
   if (end <= te) return;
   const h = e.hi(te), h2 = e.hi(end);
   ctx.save();
@@ -772,7 +796,7 @@ function drawTitle(ts) {
     'Fruit appears in the same places at the same times every day, and rots if nobody eats it.',
     'When a day ends, your snake becomes an Echo and replays itself, every day after.',
     'Echoes re-harvest the fruit they took before, and they bite. Harvest everything else.',
-    'Five days, one harvest. Fill the whole schedule to close the loop.'
+    (['Zero', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'][CFG.days] || String(CFG.days)) + ' days, one harvest. Fill the whole schedule to close the loop.'
   ];
   for (let i = 0; i < rules.length; i++) txt(rules[i], cx, ty + 84 * u + i * 26 * u, 15 * u, 500, '#b9c9de', 'center', 0.92);
   txt('Arrow keys or WASD to steer     P pause     M sound     F fullscreen', cx, ty + 84 * u + rules.length * 26 * u + 18 * u, 13 * u, 500, PAL.faint, 'center');

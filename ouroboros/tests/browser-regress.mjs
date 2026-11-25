@@ -115,10 +115,12 @@ await test('the death banner counts the rewind it is about to spend', async (p) 
   for (let i = 0; i < 400 && await phase(p) === 'play'; i++) { await p.evaluate(() => { const o = window.__ouro; o.game.input(0); o.update(o.game.cfg.tickMs); }); }
   assert.equal(await phase(p), 'dead');
   await p.evaluate(() => window.__ouro.update(600));
+  const start = await p.evaluate(() => window.__ouro.game.cfg.rewinds), left = start - 1;
   const t = await texts(p);
-  assert.ok(t.some(s => /2 rewinds left after this/.test(s)), 'banner: ' + JSON.stringify(t.filter(s => /rewind/.test(s))));
+  const want = new RegExp('\\b' + left + ' rewinds? left after this');
+  assert.ok(t.some(s => want.test(s)), 'banner should say ' + left + ' left: ' + JSON.stringify(t.filter(s => /rewind/.test(s))));
   await p.evaluate(() => window.__ouro.update(1300)); await p.evaluate(() => window.__ouro.update(800));
-  assert.ok(await p.evaluate(() => window.__ouro.game.rewinds) === 2);
+  assert.equal(await p.evaluate(() => window.__ouro.game.rewinds), left);
 });
 
 await test('the loop survives garbage in localStorage and an exception while saving', async (p) => {

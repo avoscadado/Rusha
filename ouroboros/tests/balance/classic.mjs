@@ -11,7 +11,7 @@ export const CLASSIC = { C: 20, R: 20, len0: 3, tickMs: 125, maxTicks: 40000 };
 export function playClassic(seed, opts = {}) {
   const O = core(), { C, R, len0, tickMs, maxTicks } = Object.assign({}, CLASSIC, opts);
   const rng = O.mulberry32((seed * 2246822519) >>> 0 ^ 0x1234567);
-  const skill = sampleSkill(rng, opts);
+  const skill = sampleSkill(rng, opts, tickMs);
   if (opts.slipOn == null) skill.slipOn = 'turns';
   const pol = new HumanPolicy(skill, rng, C, R);
   const run = new O.Run(C >> 1, R >> 1, 1, len0);

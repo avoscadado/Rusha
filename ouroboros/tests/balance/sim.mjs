@@ -30,6 +30,7 @@ export function playRun(seed, over, kind, botOpts) {
       g.step(); rec.ticks++;
     }
     if (g.status === 'dead') {
+      if (bot.died) bot.died();
       rec.deaths++; rec.dieds[g.dayIndex]++; rec.reasons[g.death.reason]++; rec.deathTick.push(g.run.t);
       g.afterDeath();
     } else if (g.status === 'dayDone') g.nextDay();

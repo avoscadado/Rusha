@@ -1,0 +1,4 @@
+== classic 20x20 (n=400, opts={"slipOn":"all"})
+play time s: mean 36.1 median 30.4 p10 6.5 p90 72.6 max 147.3
+fruit eaten: mean 17.2 median 15 | end causes {"wall":267,"self":133} (cap = 40000 ticks)
+(8.4 s)

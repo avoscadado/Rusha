@@ -1,13 +1,13 @@
-== base-human over={} opts={}  (n=300, fruit in plan mean 54.5 median 54)
+== BASE over={} opts={}  (n=300, fruit in plan mean 54.5 median 54)
                                       day1    day2    day3    day4    day5
-share of plan harvested that day     67.3%   20.7%    0.2%    0.0%    0.0%
-cumulative share                     67.3%   88.0%   88.2%   88.2%   88.2%
-runs reaching the day               100.0%   99.3%    7.3%    0.0%    0.0%
-attempts that die (deaths/attempts)   24.7%   74.3%   12.0%       -       -
-first day cumulative >= 90%           0.0%   65.3%    0.0%    0.0%    0.0%
-first day cumulative = 100%           0.0%   58.0%    7.3%    0.0%    0.0%
-never reaches 90% / 100%: 34.7% / 34.7%
-mean deaths/run 2.23 | victory 65.3% | >=90% 65.3% | >=75% 65.3% | out of rewinds 34.7% | mean end day 2.07
-final share mean 88.2% median 100.0% | minutes mean 3.55 median 3.28 min 1.54 max 6.87
-death causes {"wall":143,"self":69,"echo":456} | game-reported harvest differs from banked in 0.0% of runs (mean +0.0%)
-(18.0 s)
+share of plan harvested that day     67.3%   28.7%    0.7%    0.0%    0.0%
+cumulative share                     67.3%   96.0%   96.7%   96.7%   96.7%
+runs reaching the day               100.0%   99.3%   30.7%    0.0%    0.0%
+attempts that die (deaths/attempts)   24.7%   49.4%   11.8%       -       -
+first day cumulative >= 90%           0.0%   91.7%    0.0%    0.0%    0.0%
+first day cumulative = 100%           0.0%   61.0%   30.0%    0.0%    0.0%
+never reaches 90% / 100%: 8.3% / 9.0%
+mean deaths/run 1.26 | victory 91.0% | >=90% 91.7% | >=75% 91.7% | out of rewinds 9.0% | mean end day 2.30
+final share mean 96.7% | p10/p25/p50/p75/p90 100.0% 100.0% 100.0% 100.0% 100.0% | minutes mean 3.29 median 3.09 min 1.54 max 7.74
+death causes {"wall":139,"self":59,"echo":180} | game-reported harvest differs from banked in 0.0% of runs (mean +0.0%)
+(20.8 s)

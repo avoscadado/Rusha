@@ -5,15 +5,15 @@ import { runSeeds, summarize } from './run.mjs';
 import { core } from './sim.mjs';
 
 const list = JSON.parse(process.argv[2]), nS = +(process.argv[3] || 30), nH = +(process.argv[4] || 150);
-const W = os.cpus().length;
+const W = os.cpus().length, hopts = JSON.parse(process.env.HOPTS || '{}'), sopts = JSON.parse(process.env.SOPTS || '{}');
 const f = x => (100 * x).toFixed(0).padStart(3);
 for (const over of list) {
   const days = Object.assign({}, core().CFG, over).days;
   const t0 = Date.now();
   const sSeeds = Array.from({ length: nS }, (_, i) => 1000 + i), hSeeds = Array.from({ length: nH }, (_, i) => 5000 + i);
-  const S = nS ? summarize(await runSeeds('strong', sSeeds, over, {}, W), days) : null;
-  const H = summarize(await runSeeds('human', hSeeds, over, {}, W), days);
-  const Hh = nH ? summarize(await runSeeds('human-harsh', hSeeds.slice(0, 100), over, {}, W), days) : null;
+  const S = nS ? summarize(await runSeeds('strong', sSeeds, over, sopts, W), days) : null;
+  const H = summarize(await runSeeds('human', hSeeds, over, hopts, W), days);
+  const Hh = nH ? summarize(await runSeeds('human-harsh', hSeeds.slice(0, 100), over, hopts, W), days) : null;
   const cum = s => s.cumShare.map(f).join('/');
   const dr = s => s.deathRate.slice(1).map(x => isNaN(x) ? ' - ' : f(x)).join('/');
   console.log(JSON.stringify(over));

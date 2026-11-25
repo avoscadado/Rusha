@@ -10,17 +10,23 @@
 //   err    2-3 %/tick: with that probability the tick's input is slipped: half the time dropped, half the time a
 //                      random sideways key is pressed instead (even if no turn was wanted).
 //   no tours         : target = nearest reachable-looking visible fruit (Manhattan), no ordering/echo-timing plan.
+//   instincts        : keeps ~2 cells away from Echo bodies when it can (soft penalty), and remembers where an Echo
+//                      killed it earlier the same day (one remembered event per death, learned across rewinds).
 import { echoTable, BIG } from './echo-table.mjs';
 
 const DX = [0, 1, 0, -1], DY = [-1, 0, 1, 0];
 
-export function sampleSkill(rng, o = {}) {
+// Reaction time is a property of the person (224 or 336 ms = 2 or 3 ticks at the default 112 ms tick), so a slower
+// tick shortens the delay measured in ticks.
+export function sampleSkill(rng, o = {}, tickMs = 112) {
+  const delayMs = o.delayMs != null ? o.delayMs : (rng() < 0.5 ? 224 : 336);
   return {
-    delay: o.delay != null ? o.delay : (rng() < 0.5 ? 2 : 3),
+    delay: o.delay != null ? o.delay : Math.max(1, Math.round(delayMs / tickMs)),
     look: o.look != null ? o.look : 6 + Math.floor(rng() * 3),
     err: o.err != null ? o.err : 0.02 + rng() * 0.01,
     preview: o.preview != null ? o.preview : 14,
-    slipOn: o.slipOn || 'turns'
+    slipOn: o.slipOn || 'turns',
+    avoid: o.avoid, avoidR: o.avoidR
   };
 }
 
@@ -34,6 +40,8 @@ export class HumanPolicy {
     this.reset();
   }
   reset() { this.sent = []; this.tgt = -1; }
+  forgetDay() { this.mem = []; }
+  remember(cell, tick) { (this.mem = this.mem || []).push({ cell, tick }); }
 
   // w: world view (see ouroboros/classic adapters). Returns key to press (0-3) or -1.
   decide(w) {
@@ -81,7 +89,26 @@ export class HumanPolicy {
     const tgCell = tg ? tg.x + tg.y * C : -1, tx = tg ? tg.x : (C >> 1), ty = tg ? tg.y : (R >> 1), tw = tg ? 1 : 0.15;
     const best = [-1e9, -1e9, -1e9, -1e9];
     const self = this;
-    function blocked(T, c, hold) { return w.blocked(T, c, hold, known); }
+    const mem = this.mem || [];
+    if (w.prepare) w.prepare(known);
+    function blocked(T, c, hold) {
+      if (w.blocked(T, c, hold, known)) return true;
+      if (w.blockedExt && w.blockedExt(T, c, hold)) return true;
+      for (let i = 0; i < mem.length; i++) {            // a remembered fatal event: that cell (or a neighbour) at that tick
+        const m = mem[i];
+        if (m.tick >= T && m.tick < T + hold && Math.abs((m.cell % C) - (c % C)) <= 1 && Math.abs(((m.cell / C) | 0) - ((c / C) | 0)) <= 1) return true;
+      }
+      return false;
+    }
+    function nearEcho(c, T) {                           // echo-occupied cells within 2 (soft avoidance)
+      const x = c % C, y = (c / C) | 0; let n = 0;
+      for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= C || ny >= R) continue;
+        if (w.blocked(T, nx + ny * C, 1, known)) n++;
+      }
+      return n;
+    }
     function flood(startCell, T, need) {
       self.stamp++; const st = self.stamp, seen = self.seen, q = self.queue;
       let qh = 0, qt = 0, n = 0; q[qt++] = startCell; seen[startCell] = st;
@@ -122,6 +149,11 @@ export class HumanPolicy {
             const need = Math.max(hIdx - tIdx + 6, 18);
             const area = flood(nc, T, need);
             if (area < need) sc -= 40 + (need - area) * 12;
+            if (sc > best[d0] && w.hasEchoes) {
+              sc -= 5 * nearEcho(nc, T);
+              const dh = w.echoHeadDist(T, nc, known), rad = self.sk.avoidR != null ? self.sk.avoidR : 7;     // keep clear of echo heads
+              if (dh < rad) sc -= (self.sk.avoid != null ? self.sk.avoid : 4) * (rad - dh);
+            }
             if (sc > best[d0]) best[d0] = sc;
           }
         } else rec(depth + 1, nd, hIdx + 1, eats ? tIdx : tIdx + 1, d0, nturns, nate);
@@ -162,7 +194,7 @@ export class HumanPolicy {
 // ---------- Ouroboros adapter ----------
 export function makeHumanBot(O, g, rng, botOpts = {}) {
   const C = g.cfg.cols, R = g.cfg.rows, N = C * R;
-  const skill = sampleSkill(rng, botOpts);
+  const skill = sampleSkill(rng, botOpts, g.cfg.tickMs);
   const pol = new HumanPolicy(skill, rng, C, R);
   let ne = null;
   const tele = g.cfg.telegraph;
@@ -177,6 +209,40 @@ export function makeHumanBot(O, g, rng, botOpts = {}) {
     actualDir() { return g.queue.length ? g.queue[g.queue.length - 1] : g.run.dir; },
     // an Echo is only "known" up to tick `known` (snapshot + preview); later ticks are assumed empty
     blocked(T, c, hold, known) { const e = ne[T * N + c]; return e <= known && e < T + hold; },
+    // Dead reckoning: beyond the preview the player extrapolates each Echo straight ahead (same heading, same length)
+    // for `reach` more ticks. Cells get occupancy intervals [a,b] (ticks).
+    ext: new Array(N), touched: [],
+    prepare(known) {
+      for (const c of this.touched) this.ext[c] = null;
+      this.touched.length = 0;
+      if (!botOpts.deadReckon && botOpts.deadReckon !== undefined) return;
+      const reach = botOpts.reach || 30;
+      const add = (c, a, b) => { (this.ext[c] || (this.ext[c] = (this.touched.push(c), []))).push(a, b); };
+      for (let k = 0; k < g.echoes.length; k++) {
+        const e = g.echoes[k]; if (known >= e.t) continue;
+        const h = e.hi(known), si = e.si(known), len = h - si + 1;
+        for (let i = si + 1; i <= h; i++) add(e.px[i] + e.py[i] * C, known + 1, known + (i - si));
+        const dx = e.px[h] - e.px[h - 1], dy = e.py[h] - e.py[h - 1];
+        let x = e.px[h], y = e.py[h];
+        for (let m = 1; m <= reach; m++) {
+          x += dx; y += dy; if (x < 0 || y < 0 || x >= C || y >= R) break;
+          add(x + y * C, known + m, known + m + len - 1);
+        }
+      }
+    },
+    echoHeadDist(T, c, known) {
+      let best = 99; const x = c % C, y = (c / C) | 0;
+      for (let k = 0; k < g.echoes.length; k++) {
+        const e = g.echoes[k], te = Math.min(T, known, e.t), h = e.hi(te);
+        best = Math.min(best, Math.max(Math.abs(e.px[h] - x), Math.abs(e.py[h] - y)));
+      }
+      return best;
+    },
+    blockedExt(T, c, hold) {
+      const l = this.ext[c]; if (!l) return false;
+      for (let i = 0; i < l.length; i += 2) if (l[i] < T + hold && l[i + 1] >= T) return true;
+      return false;
+    },
     targets(s, t) {
       const out = [];
       for (let i = 0; i < g.fruits.length; i++) {
@@ -189,7 +255,8 @@ export function makeHumanBot(O, g, rng, botOpts = {}) {
   };
   return {
     skill,
-    start() { pol.reset(); ne = echoTable(g); },
+    start() { pol.reset(); if (g.attempt === 1) pol.forgetDay(); ne = echoTable(g); w.hasEchoes = g.echoes.length > 0; },
+    died() { const d = g.death; if (d && d.reason === 'echo') pol.remember(d.x + d.y * C, d.t); },
     decide() { w.t = g.run.t; return pol.decide(w); }
   };
 }

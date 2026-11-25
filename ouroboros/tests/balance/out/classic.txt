@@ -1,0 +1,4 @@
+== classic 20x20 (n=400, opts={})
+play time s: mean 85.3 median 76.5 p10 17.3 p90 167.6 max 381.0
+fruit eaten: mean 36.8 median 36 | end causes {"self":195,"wall":205} (cap = 40000 ticks)
+(19.5 s)

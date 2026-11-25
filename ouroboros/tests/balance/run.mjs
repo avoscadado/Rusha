@@ -45,7 +45,7 @@ export function summarize(recs, days) {
   out.ge90 = recs.filter(r => ratio(r) >= 0.9).length / n;
   out.ge75 = recs.filter(r => ratio(r) >= 0.75).length / n;
   out.ranOut = recs.filter(r => r.ranOut).length / n;
-  out.finalMean = mean(recs.map(ratio)); out.finalMedian = q(recs.map(ratio), 0.5);
+  out.finalMean = mean(recs.map(ratio)); out.finalMedian = q(recs.map(ratio), 0.5); out.finalQ = [0.1, 0.25, 0.5, 0.75, 0.9].map(p => q(recs.map(ratio), p));
   out.endDay = mean(recs.map(r => r.endDay));
   out.min = mean(recs.map(r => r.minutes)); out.minMedian = q(recs.map(r => r.minutes), 0.5);
   out.minMin = Math.min(...recs.map(r => r.minutes)); out.minMax = Math.max(...recs.map(r => r.minutes));
@@ -75,7 +75,7 @@ export function printSummary(label, s, days) {
   row('first day cumulative = 100%', s.d100.slice(1), pct);
   L.push(`never reaches 90% / 100%: ${pct(s.d90[0])} / ${pct(s.d100[0])}`);
   L.push(`mean deaths/run ${s.deathsPerRun.toFixed(2)} | victory ${pct(s.victory)} | >=90% ${pct(s.ge90)} | >=75% ${pct(s.ge75)} | out of rewinds ${pct(s.ranOut)} | mean end day ${s.endDay.toFixed(2)}`);
-  L.push(`final share mean ${pct(s.finalMean)} median ${pct(s.finalMedian)} | minutes mean ${s.min.toFixed(2)} median ${s.minMedian.toFixed(2)} min ${s.minMin.toFixed(2)} max ${s.minMax.toFixed(2)}`);
+  L.push(`final share mean ${pct(s.finalMean)} | p10/p25/p50/p75/p90 ${s.finalQ.map(pct).join(' ')} | minutes mean ${s.min.toFixed(2)} median ${s.minMedian.toFixed(2)} min ${s.minMin.toFixed(2)} max ${s.minMax.toFixed(2)}`);
   L.push(`death causes ${JSON.stringify(s.reasons)} | game-reported harvest differs from banked in ${pct(s.bugDiff)} of runs (mean +${pct(s.bugDiffMean)})`);
   console.log(L.join('\n'));
 }

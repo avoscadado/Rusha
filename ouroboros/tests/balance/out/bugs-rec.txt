@@ -1,0 +1,4 @@
+[1] final tally after the LAST death (seed 1, rewinds:0): dead attempt had eaten 5; echoes banked 0; final.harvested = 0 (Sleepwalker) -> OK (fixed in the tree; the first copy I read counted the dead attempt, giving 5)
+[2] unreachable-by-geometry fruit (Manhattan from every day's spawn > last live tick): 0/30114 fruit, in 0/300 seeds []
+[3] spawn clearance histogram over 240 attempt starts (9 = >=9): {"3":1,"4":13,"5":5,"6":41,"7":15,"8":31,"9":134} deaths in first 12 ticks: 0
+[4] startLen 12: first body x = -4 (board starts at 0), y 14; echoOcc would index cell 612
